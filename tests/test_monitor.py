@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from monitor import (
     JST, KOKUBUNJI_URL, TACHIKAWA_URL, PAGES,
-    Machine, ParseError, alert_needed, parse_store_page, parse_timestamp,
+    Machine, ParseError, alert_needed, parse_store_page, parse_timestamp, notification_text,
 )
 
 HTML = """
@@ -78,6 +78,24 @@ class MonitorTests(unittest.TestCase):
     def test_missing_store_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_store_page(HTML, KOKUBUNJI_URL, PAGES[KOKUBUNJI_URL], self.now)
+
+
+    def test_full_discord_notification_format(self):
+        old = self.now - timedelta(hours=14)
+        fresh = self.now - timedelta(minutes=5)
+        items = [
+            Machine("タイトーステーション 国分寺店", 1, "5分前", KOKUBUNJI_URL, self.now, fresh),
+            Machine("タイトーステーション 国分寺店", 2, "5分前", KOKUBUNJI_URL, self.now, fresh),
+            Machine("タイトーステーション 立川北口店", 1, "2日前", TACHIKAWA_URL, self.now, old),
+            Machine("ビックカメラ立川店", 1, "42分前", TACHIKAWA_URL, self.now, self.now - timedelta(minutes=42)),
+            Machine("namcoららぽーと立川立飛おまけ横丁店", 1, "14時間前", TACHIKAWA_URL, self.now, old),
+            Machine("namcoららぽーと立川立飛おまけ横丁店", 2, "14時間前", TACHIKAWA_URL, self.now, old),
+        ]
+        output = notification_text(items)
+        self.assertIn("1台目【稼働】 5分前", output)
+        self.assertIn("1台目【稼働】 14時間前", output)
+        self.assertLess(output.index("国分寺店"), output.index("立川北口店"))
+        self.assertLess(len(output), 2000)
 
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
