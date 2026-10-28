@@ -1,0 +1,13 @@
+{
+  "name": "aikatsu-store-discord-interactions",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@vercel/functions": "^2.0.0",
+    "cheerio": "^1.0.0"
+  }
+}
