@@ -1,0 +1,71 @@
+name: Aikatsu Encore Store Monitor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'monitor.py'
+      - 'requirements.txt'
+      - 'tests/**'
+      - '.github/workflows/monitor.yml'
+  schedule:
+    # JST is UTC+09:00; minute values are identical in both zones.
+    - cron: '5,25,45 * * * *'
+  workflow_dispatch:
+    inputs:
+      send_test:
+        description: 'Send Discord test message (without checking site)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aikatsu-store-monitor
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+
+  check:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requirements
+        run: pip install -r requirements.txt
+      - name: Monitor official website or send test
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TEST_NOTIFICATION: ${{ inputs.send_test }}
+        run: python monitor.py
+      - name: Save alert history on default branch
+        if: ${{ always() && !inputs.send_test }}
+        run: |
+          if ! git diff --quiet -- data/state.json; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add data/state.json
+            git commit -m 'chore: update monitor state [skip ci]'
+            git push
+          fi
