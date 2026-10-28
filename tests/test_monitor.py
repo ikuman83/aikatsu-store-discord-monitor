@@ -40,11 +40,12 @@ class MonitorTests(unittest.TestCase):
             HTML, TACHIKAWA_URL, PAGES[TACHIKAWA_URL], self.now
         )
         self.assertEqual(len(items), 4)
-        self.assertEqual([item.number for item in items[:2]], [1, 2])
-        self.assertEqual(items[0].label, "37分前")
-        self.assertEqual(items[0].updated_at.astimezone(JST).hour, 20)
-        self.assertTrue(alert_needed(items[0], {}))
-        self.assertFalse(alert_needed(items[-1], {}))
+        namco = [m for m in items if m.store.startswith("namco")]
+        self.assertEqual([item.number for item in namco], [1, 2])
+        self.assertEqual(namco[0].label, "37分前")
+        self.assertEqual(namco[0].updated_at.astimezone(JST).hour, 20)
+        self.assertTrue(alert_needed(namco[0], {}))
+        self.assertFalse(alert_needed(next(m for m in items if m.store == "ビックカメラ立川店"), {}))
 
     def test_exact_timestamp_and_boundary(self):
         self.assertEqual(
