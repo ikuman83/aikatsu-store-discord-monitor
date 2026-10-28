@@ -77,6 +77,8 @@ async function respondLater(interaction) {
   if (!result.ok) console.error('Discord status reply failed:',result.status,await result.text());
 }
 
+export const config = { api: { bodyParser: false } };
+
 export default async function handler(req,res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
   const buffers=[];
