@@ -183,7 +183,7 @@ def notification_text(items: list[Machine]) -> str:
             # An item in the official runningList is listed as operating.
             # Never infer "稼働なし" merely from an old update timestamp.
             lines.append(f"{item.number}台目【稼働】 {item.label}")
-        lines.append("")
+        lines.extend(["", ""])
     lines.append("※いずれかの筐体の最終更新が60分以内になったため通知しました。")
     lines.append(
         f"確認：{datetime.now(JST):%Y/%m/%d %H:%M} JST"
@@ -220,6 +220,7 @@ def run() -> int:
         print("Discordへのテスト通知を送信しました（履歴は変更しません）")
         return 0
 
+    status_request = os.environ.get("STATUS_REQUEST", "").lower() in {"1", "true", "yes"}
     state = load_state()
     errors: list[str] = []
     machines: list[Machine] = []
@@ -237,15 +238,18 @@ def run() -> int:
         target = "通知対象" if machine in ready else "対象外"
         print(f"{machine.store} / {machine.number}台目 / {machine.label} / {target}")
 
-    if ready and not errors:
+    if (ready or status_request) and not errors:
         message = notification_text(machines)
+        if status_request:
+            message = message.replace("※いずれかの筐体の最終更新が60分以内になったため通知しました。", "📋 手動リクエストによる現在の稼働情報です。")
         if len(message) > 2000:
             raise RuntimeError("Discord通知文が2000文字を超えました")
         send_discord(webhook, message)
-        for machine in ready:
-            state["last_alerted"][machine.key] = machine.updated_at.isoformat()
-        save_state(state)
-        print(f"新しい更新 {len(ready)}台を検知し、全店舗の状態をDiscordへ通知しました")
+        if not status_request:
+            for machine in ready:
+                state["last_alerted"][machine.key] = machine.updated_at.isoformat()
+            save_state(state)
+        print("現在状況をDiscordへ送信しました" if status_request else f"新しい更新 {len(ready)}台を検知し、全店舗の状態をDiscordへ通知しました")
     elif ready:
         print("サイト取得に失敗した店舗があるため、不完全な一覧は通知しません")
     else:
