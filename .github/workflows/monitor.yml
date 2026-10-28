@@ -13,6 +13,11 @@ on:
     - cron: '5,25,45 * * * *'
   workflow_dispatch:
     inputs:
+      status_now:
+        description: 'Send the current status of all four stores to Discord'
+        required: false
+        type: boolean
+        default: false
       send_test:
         description: 'Send Discord test message (without checking site)'
         required: false
@@ -59,9 +64,10 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TEST_NOTIFICATION: ${{ inputs.send_test }}
+          STATUS_REQUEST: ${{ inputs.status_now }}
         run: python monitor.py
       - name: Save alert history on default branch
-        if: ${{ always() && !inputs.send_test }}
+        if: ${{ always() && !inputs.send_test && !inputs.status_now }}
         run: |
           if ! git diff --quiet -- data/state.json; then
             git config user.name 'github-actions[bot]'
