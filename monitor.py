@@ -42,27 +42,6 @@ def compact(text: str) -> str:
     return re.sub(r"\s+", "", norm(text))
 
 
-def age_in_minutes(label: str) -> float | None:
-    """Return age only when it unambiguously represents under an hour."""
-    value = compact(label)
-    if value in {"たった今", "今", "今さっき", "更新直後"}:
-        return 0.0
-    if value == "数秒前":
-        return 0.1
-    if value == "数分前":
-        return 3.0
-    match = re.fullmatch(r"([0-9]+)(秒|分|時間|日|週間|ヶ月|か月|年)前", value)
-    if not match:
-        return None
-    n, unit = int(match.group(1)), match.group(2)
-    if unit == "秒":
-        return n / 60
-    if unit == "分":
-        return float(n)
-    # "1時間前" could mean anything between 60 and 119 minutes.
-    return None
-
-
 @dataclass(frozen=True)
 class Machine:
     store: str
@@ -70,62 +49,70 @@ class Machine:
     label: str
     url: str
     checked_at: datetime
+    updated_at: datetime
 
     @property
     def key(self) -> str:
         return f"{self.store}::{self.number}"
 
     @property
-    def age_minutes(self) -> float | None:
-        return age_in_minutes(self.label)
+    def age_minutes(self) -> float:
+        return (self.checked_at - self.updated_at).total_seconds() / 60
 
     @property
-    def update_estimate(self) -> datetime | None:
-        age = self.age_minutes
-        return self.checked_at - timedelta(minutes=age) if age is not None else None
+    def update_estimate(self) -> datetime:
+        # Kept for compatibility with persisted state from earlier versions.
+        return self.updated_at
+
+
+def parse_timestamp(raw: str) -> datetime:
+    # The site's span.timeago has a JST timestamp in title, for example
+    # title="2026-10-2820:23:02". Preserve seconds to prevent duplicates.
+    try:
+        value = re.sub(r"\s+", "", raw)
+        dt = datetime.strptime(value, "%Y-%m-%d%H:%M:%S")
+        return dt.replace(tzinfo=JST).astimezone(timezone.utc)
+    except ValueError as exc:
+        raise ParseError(f"更新日時が読めません: {raw!r}") from exc
 
 
 def parse_store_page(
     html: str | bytes, url: str, names: tuple[str, ...], checked_at: datetime
 ) -> list[Machine]:
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "template"]):
-        tag.decompose()
-    tokens = [norm(s) for s in soup.stripped_strings]
-    if not tokens:
-        raise ParseError("ページ本文が空です")
-
-    # Store names may also occur in a summary; use the final occurrence,
-    # expected to be the detail heading, to find its machine records.
-    positions: dict[str, int] = {}
-    for name in names:
-        matches = [i for i, token in enumerate(tokens) if compact(name) in compact(token)]
-        if not matches:
-            raise ParseError(f"対象店舗が見つかりません: {name}")
-        positions[name] = matches[-1]
-
-    ordered = sorted(positions.items(), key=lambda pair: pair[1])
     machines: list[Machine] = []
-    for i, (name, start) in enumerate(ordered):
-        stop = ordered[i + 1][1] if i + 1 < len(ordered) else len(tokens)
-        segment = tokens[start:stop]
-        current: int | None = None
-        found: set[int] = set()
-        for j, token in enumerate(segment):
-            machine = re.search(r"(?<![0-9])([0-9]+)\s*台目", token)
-            if machine:
-                current = int(machine.group(1))
-                continue
-            match = re.search(r"最終更新\s*[:：]?\s*(.*)", token)
-            if match and current is not None:
-                label = match.group(1).strip()
-                if not label and j + 1 < len(segment):
-                    label = segment[j + 1].strip()
-                if label and current not in found:
-                    machines.append(Machine(name, current, label, url, checked_at))
-                    found.add(current)
-        if not found:
-            raise ParseError(f"筐体の最終更新表示が読み取れません: {name}")
+    # The search results only list the stores. Machine information is in
+    # div.modalFilterCol -> ul.runningList -> li.runningItem.
+    modals = soup.select("div.modalFilterCol")
+    for name in names:
+        exact_modals = []
+        for modal in modals:
+            heading = modal.select_one(".storeInfoRow .storeColName")
+            if heading and compact(heading.get_text(" ", strip=True)) == compact(name):
+                exact_modals.append(modal)
+        if len(exact_modals) != 1:
+            raise ParseError(f"店舗詳細が一意に見つかりません: {name} (件数={len(exact_modals)})")
+        items = exact_modals[0].select("li.runningItem")
+        if not items:
+            raise ParseError(f"筐体が見つかりません: {name}")
+        seen: set[int] = set()
+        for item in items:
+            num = item.select_one(".runningItemNum .num")
+            timeago = item.select_one(".runningItemTime .timeago")
+            if not num or not timeago:
+                raise ParseError(f"筐体番号または更新日時がありません: {name}")
+            try:
+                number = int(compact(num.get_text()))
+            except ValueError as exc:
+                raise ParseError(f"筐体番号が不正です: {name}") from exc
+            if number in seen:
+                raise ParseError(f"筐体番号が重複しています: {name} {number}台目")
+            seen.add(number)
+            updated_at = parse_timestamp(timeago.get("title", ""))
+            label = timeago.get_text(" ", strip=True)
+            if not label:
+                raise ParseError(f"相対更新時間が空です: {name} {number}台目")
+            machines.append(Machine(name, number, label, url, checked_at, updated_at))
     return machines
 
 
@@ -164,17 +151,15 @@ def save_state(state: dict[str, Any]) -> None:
 
 
 def alert_needed(machine: Machine, last_alerted: dict[str, str]) -> bool:
-    age = machine.age_minutes
-    if age is None or age >= 60:
+    # A newly reported update must be within the last 60 minutes.
+    age = (machine.checked_at - machine.updated_at).total_seconds()
+    if age < 0 or age > 60 * 60:
         return False
-    estimated = machine.update_estimate
-    assert estimated is not None
     old_value = last_alerted.get(machine.key)
     if not old_value:
         return True
     old = datetime.fromisoformat(old_value.replace("Z", "+00:00"))
-    # A few minutes of tolerance for rounded relative-time labels.
-    return estimated - old > timedelta(minutes=5)
+    return machine.updated_at > old
 
 
 def notification_text(items: list[Machine]) -> str:
@@ -182,13 +167,13 @@ def notification_text(items: list[Machine]) -> str:
     for item in items:
         lines += [
             f"**{item.store}**（{item.number}台目）",
-            f"最終更新：**{item.label}**",
+            f"最終更新：**{item.label}**（{item.updated_at.astimezone(JST):%Y/%m/%d %H:%M:%S} JST）",
             f"公式ページ：{item.url}",
             "",
         ]
     lines.append(
         f"確認時刻：{datetime.now(JST):%Y/%m/%d %H:%M} JST"
-        "（公式サイトの相対時間表示に基づく）"
+        "（公式サイトの更新日時に基づく）"
     )
     return "\n".join(lines)
 
@@ -250,8 +235,7 @@ def run() -> int:
         for group in groups:
             send_discord(webhook, notification_text(group))
             for machine in group:
-                timestamp = machine.update_estimate
-                assert timestamp is not None
+                timestamp = machine.updated_at
                 state["last_alerted"][machine.key] = timestamp.isoformat()
             save_state(state)
         print(f"新しい更新 {len(ready)}台をDiscordへ通知しました")
