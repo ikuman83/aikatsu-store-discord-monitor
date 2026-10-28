@@ -163,18 +163,33 @@ def alert_needed(machine: Machine, last_alerted: dict[str, str]) -> bool:
 
 
 def notification_text(items: list[Machine]) -> str:
-    lines = ["🎴 **アイカツ！アンコール：店舗の最新更新を検知**", ""]
-    for item in items:
-        lines += [
-            f"**{item.store}**（{item.number}台目）",
-            f"最終更新：**{item.label}**（{item.updated_at.astimezone(JST):%Y/%m/%d %H:%M:%S} JST）",
-            f"公式ページ：{item.url}",
-            "",
-        ]
-    lines.append(
-        f"確認時刻：{datetime.now(JST):%Y/%m/%d %H:%M} JST"
-        "（公式サイトの更新日時に基づく）"
+    """Full four-store status, in the requested order, not only changed machines."""
+    ordered_names = (
+        "タイトーステーション 国分寺店",
+        "タイトーステーション 立川北口店",
+        "ビックカメラ立川店",
+        "namcoららぽーと立川立飛おまけ横丁店",
     )
+    lines = ["🎴 **アイカツ！アンコール 店舗更新情報**", ""]
+    for name in ordered_names:
+        store_items = sorted(
+            (item for item in items if item.store == name),
+            key=lambda item: item.number,
+        )
+        if not store_items:
+            raise ParseError(f"通知表示に必要な店舗情報が不足しています: {name}")
+        lines.append(f"**{name}**")
+        for item in store_items:
+            # An item in the official runningList is listed as operating.
+            # Never infer "稼働なし" merely from an old update timestamp.
+            lines.append(f"{item.number}台目【稼働】 {item.label}")
+        lines.append("")
+    lines.append("※いずれかの筐体の最終更新が60分以内になったため通知しました。")
+    lines.append(
+        f"確認：{datetime.now(JST):%Y/%m/%d %H:%M} JST"
+    )
+    lines.append(f"立川：{TACHIKAWA_URL}")
+    lines.append(f"国分寺：{KOKUBUNJI_URL}")
     return "\n".join(lines)
 
 
@@ -222,23 +237,17 @@ def run() -> int:
         target = "通知対象" if machine in ready else "対象外"
         print(f"{machine.store} / {machine.number}台目 / {machine.label} / {target}")
 
-    if ready:
-        groups: list[list[Machine]] = []
-        group: list[Machine] = []
+    if ready and not errors:
+        message = notification_text(machines)
+        if len(message) > 2000:
+            raise RuntimeError("Discord通知文が2000文字を超えました")
+        send_discord(webhook, message)
         for machine in ready:
-            if group and len(notification_text(group + [machine])) > 1900:
-                groups.append(group)
-                group = []
-            group.append(machine)
-        if group:
-            groups.append(group)
-        for group in groups:
-            send_discord(webhook, notification_text(group))
-            for machine in group:
-                timestamp = machine.updated_at
-                state["last_alerted"][machine.key] = timestamp.isoformat()
-            save_state(state)
-        print(f"新しい更新 {len(ready)}台をDiscordへ通知しました")
+            state["last_alerted"][machine.key] = machine.updated_at.isoformat()
+        save_state(state)
+        print(f"新しい更新 {len(ready)}台を検知し、全店舗の状態をDiscordへ通知しました")
+    elif ready:
+        print("サイト取得に失敗した店舗があるため、不完全な一覧は通知しません")
     else:
         print("新しい通知対象はありません")
 
