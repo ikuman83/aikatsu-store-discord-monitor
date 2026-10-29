@@ -170,7 +170,7 @@ def notification_text(items: list[Machine]) -> str:
         "ビックカメラ立川店",
         "namcoららぽーと立川立飛おまけ横丁店",
     )
-    lines = ["🎴 **アイカツ！アンコール 店舗更新情報**", ""]
+    lines = []
     for name in ordered_names:
         store_items = sorted(
             (item for item in items if item.store == name),
@@ -178,18 +178,12 @@ def notification_text(items: list[Machine]) -> str:
         )
         if not store_items:
             raise ParseError(f"通知表示に必要な店舗情報が不足しています: {name}")
-        lines.append(f"**{name}**")
+        lines.append(name)
         for item in store_items:
             # An item in the official runningList is listed as operating.
             # Never infer "稼働なし" merely from an old update timestamp.
             lines.append(f"{item.number}台目【稼働】 {item.label}")
         lines.extend(["", ""])
-    lines.append("※いずれかの筐体の最終更新が60分以内になったため通知しました。")
-    lines.append(
-        f"確認：{datetime.now(JST):%Y/%m/%d %H:%M} JST"
-    )
-    lines.append(f"立川：{TACHIKAWA_URL}")
-    lines.append(f"国分寺：{KOKUBUNJI_URL}")
     return "\n".join(lines)
 
 
@@ -240,8 +234,6 @@ def run() -> int:
 
     if (ready or status_request) and not errors:
         message = notification_text(machines)
-        if status_request:
-            message = message.replace("※いずれかの筐体の最終更新が60分以内になったため通知しました。", "📋 手動リクエストによる現在の稼働情報です。")
         if len(message) > 2000:
             raise RuntimeError("Discord通知文が2000文字を超えました")
         send_discord(webhook, message)
