@@ -97,6 +97,19 @@ class MonitorTests(unittest.TestCase):
         self.assertLess(output.index("国分寺店"), output.index("立川北口店"))
         self.assertLess(len(output), 2000)
 
+    def test_unavailable_store_in_full_notification(self):
+        from monitor import notification_text
+        checked = self.now
+        machines = [
+            Machine(name, 1, "5分前", url, checked, checked - timedelta(minutes=5))
+            for url, names in PAGES.items() for name in names
+            if name != "タイトーステーション 立川北口店"
+        ]
+        result = notification_text(machines, {"タイトーステーション 立川北口店"})
+        self.assertIn("タイトーステーション 立川北口店\\n情報取得不可", result)
+        self.assertIn("ビックカメラ立川店", result)
+        self.assertIn("タイトーステーション 国分寺店", result)
+
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_timestamp("unknown")
