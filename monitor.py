@@ -184,6 +184,7 @@ def notification_text(items: list[Machine]) -> str:
             # Never infer "稼働なし" merely from an old update timestamp.
             lines.append(f"{item.number}台目【稼働】 {item.label}")
         lines.extend(["", ""])
+    lines.append(f"確認時間：{datetime.now(JST):%Y/%m/%d %H:%M} JST")
     return "\n".join(lines)
 
 
