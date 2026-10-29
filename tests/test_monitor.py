@@ -106,7 +106,7 @@ class MonitorTests(unittest.TestCase):
             if name != "タイトーステーション 立川北口店"
         ]
         result = notification_text(machines, {"タイトーステーション 立川北口店"})
-        self.assertIn("タイトーステーション 立川北口店\\n情報取得不可", result)
+        self.assertIn("タイトーステーション 立川北口店\n情報取得不可", result)
         self.assertIn("ビックカメラ立川店", result)
         self.assertIn("タイトーステーション 国分寺店", result)
 
