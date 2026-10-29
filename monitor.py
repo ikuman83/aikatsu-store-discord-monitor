@@ -162,7 +162,7 @@ def alert_needed(machine: Machine, last_alerted: dict[str, str]) -> bool:
     return machine.updated_at > old
 
 
-def notification_text(items: list[Machine]) -> str:
+def notification_text(items: list[Machine], unavailable: set[str] | None = None) -> str:
     """Full four-store status, in the requested order, not only changed machines."""
     ordered_names = (
         "タイトーステーション 国分寺店",
@@ -170,6 +170,7 @@ def notification_text(items: list[Machine]) -> str:
         "ビックカメラ立川店",
         "namcoららぽーと立川立飛おまけ横丁店",
     )
+    unavailable = unavailable or set()
     lines = []
     for name in ordered_names:
         store_items = sorted(
@@ -177,6 +178,9 @@ def notification_text(items: list[Machine]) -> str:
             key=lambda item: item.number,
         )
         if not store_items:
+            if name in unavailable:
+                lines.extend([name, "情報取得不可", "", ""])
+                continue
             raise ParseError(f"通知表示に必要な店舗情報が不足しています: {name}")
         lines.append(name)
         for item in store_items:
@@ -218,35 +222,50 @@ def run() -> int:
     status_request = os.environ.get("STATUS_REQUEST", "").lower() in {"1", "true", "yes"}
     state = load_state()
     errors: list[str] = []
+    unavailable: set[str] = set()
     machines: list[Machine] = []
     for url, names in PAGES.items():
         try:
             html, checked_at = fetch_page(url)
-            found = parse_store_page(html, url, names, checked_at)
-            machines.extend(found)
-            print(f"OK: {url}: {len(found)}台を解析")
-        except (requests.RequestException, ParseError, UnicodeError) as exc:
+        except (requests.RequestException, UnicodeError) as exc:
             errors.append(f"{url}: {exc}")
+            unavailable.update(names)
+            continue
+        for name in names:
+            try:
+                found = parse_store_page(html, url, (name,), checked_at)
+                machines.extend(found)
+                print(f"OK: {name}: {len(found)}台を解析")
+            except (ParseError, UnicodeError) as exc:
+                errors.append(f"{name}: {exc}")
+                unavailable.add(name)
 
     ready = [machine for machine in machines if alert_needed(machine, state["last_alerted"])]
     for machine in machines:
         target = "通知対象" if machine in ready else "対象外"
         print(f"{machine.store} / {machine.number}台目 / {machine.label} / {target}")
+    for name in sorted(unavailable):
+        print(f"{name} / 情報取得不可")
 
-    if (ready or status_request) and not errors:
-        message = notification_text(machines)
-        if len(message) > 2000:
-            raise RuntimeError("Discord通知文が2000文字を超えました")
-        send_discord(webhook, message)
-        if not status_request:
-            for machine in ready:
-                state["last_alerted"][machine.key] = machine.updated_at.isoformat()
-            save_state(state)
-        print("現在状況をDiscordへ送信しました" if status_request else f"新しい更新 {len(ready)}台を検知し、全店舗の状態をDiscordへ通知しました")
-    elif ready:
-        print("サイト取得に失敗した店舗があるため、不完全な一覧は通知しません")
+    if ready or status_request:
+        if machines:
+            message = notification_text(machines, unavailable)
+            if len(message) > 2000:
+                raise RuntimeError("Discord通知文が2000文字を超えました")
+            send_discord(webhook, message)
+            if not status_request:
+                for machine in ready:
+                    state["last_alerted"][machine.key] = machine.updated_at.isoformat()
+                save_state(state)
+            print("現在状況をDiscordへ送信しました" if status_request else
+                  f"新しい更新 {len(ready)}台を検知し、取得できた店舗の状況をDiscordへ通知しました")
+        else:
+            print("全店舗の取得に失敗したため通知しません")
     else:
         print("新しい通知対象はありません")
+
+    for message in errors:
+        print(f"WARNING: {message}", file=sys.stderr)
 
     # Commit weekly activity so public GitHub schedules do not go inactive.
     now = datetime.now(timezone.utc)
@@ -255,11 +274,9 @@ def run() -> int:
         state["last_activity"] = now.isoformat()
         save_state(state)
 
-    if errors:
-        for message in errors:
-            print(f"ERROR: {message}", file=sys.stderr)
-        return 1
-    return 0
+    # Partial failures are warnings: other stores remain monitored.
+    # Total failure is still an error, not a false success.
+    return 0 if machines else 1
 
 
 if __name__ == "__main__":
