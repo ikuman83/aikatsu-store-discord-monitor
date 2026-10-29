@@ -10,7 +10,7 @@ on:
       - '.github/workflows/monitor.yml'
   schedule:
     # JST is UTC+09:00; minute values are identical in both zones.
-    - cron: '5,25,45 * * * *'
+    - cron: '5,20,35,50 * * * *'
   workflow_dispatch:
     inputs:
       status_now:
