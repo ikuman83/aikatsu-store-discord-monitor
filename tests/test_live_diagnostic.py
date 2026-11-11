@@ -11,6 +11,8 @@ class LivePageDiagnostic(unittest.TestCase):
             print("DIAGNOSTIC URL", url, "bytes", len(html), "title", soup.title.get_text(" ",strip=True) if soup.title else "-",flush=True)
             print("DIAGNOSTIC body text:", repr(soup.get_text(" ",strip=True)[:1300]),flush=True)
             print("DIAGNOSTIC div classes:", [(cls, len(soup.select("."+cls))) for cls in ["modalFilterCol","resultColBox","runningItem","runningList","storeColName","timeago"]],flush=True)
+            print("DIAGNOSTIC FORMS:", [(f.get("action"),f.get("method"), [(i.get("name"),i.get("value"),i.get("type")) for i in f.select("input, select")][:18]) for f in soup.select("form")],flush=True)
+            print("DIAGNOSTIC LINKS:", [(a.get("href"),a.get_text(" ",strip=True)[:45]) for a in soup.select("a[href]") if "shoplist" in (a.get("href") or "")][:24],flush=True)
             print("DIAGNOSTIC meta:", [(tag.get("name"),tag.get("content","")[:150]) for tag in soup.select("meta[name=robots],meta[name=description]")],flush=True)
             for name in names:
                 print("DIAGNOSTIC STORE", name, "mentioned=",compact(name) in compact(soup.get_text(" ",strip=True)),flush=True)
