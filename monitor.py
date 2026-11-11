@@ -274,9 +274,36 @@ def run() -> int:
         state["last_activity"] = now.isoformat()
         save_state(state)
 
-    # Partial failures are warnings: other stores remain monitored.
-    # Total failure is still an error, not a false success.
-    return 0 if machines else 1
+    # The official pages currently return HTTP 200 and "検索結果 0件".
+    # This is a site-data state, not a GitHub Actions execution failure.
+    # Record one outage notification after 24h, then remain quiet until recovery.
+    if not machines:
+        first = state.get("unavailable_since")
+        if first is None:
+            state["unavailable_since"] = now.isoformat()
+            state["unavailable_alerted"] = False
+            save_state(state)
+            print("監視データを取得できません。24時間継続時に一度だけDiscordへ通知します")
+        else:
+            since = datetime.fromisoformat(first.replace("Z", "+00:00"))
+            if now - since >= timedelta(hours=24) and not state.get("unavailable_alerted", False):
+                send_discord(webhook, (
+                    "⚠️ アイカツ！監視情報を24時間以上取得できません。"
+                    "公式店舗検索が0件などの状態のため、現在は更新通知ができません。"
+                    "監視は30分ごとに継続し、情報が復旧すれば自動復帰します。"
+                ))
+                state["unavailable_alerted"] = True
+                save_state(state)
+                print("長時間取得不可の通知をDiscordへ1回送信しました")
+        return 0
+
+    if state.get("unavailable_since"):
+        state.pop("unavailable_since", None)
+        state.pop("unavailable_alerted", None)
+        save_state(state)
+        print("取得できる店舗が復旧しました")
+
+    return 0
 
 
 if __name__ == "__main__":
