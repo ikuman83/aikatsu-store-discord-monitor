@@ -116,6 +116,42 @@ def parse_store_page(
     return machines
 
 
+def store_listing_status(html: str | bytes, name: str) -> str:
+    """Return present/absent/unknown based only on a complete store-search page.
+
+    A missing modal alone is not proof a store is no longer listed.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    detail_names = [
+        compact(heading.get_text(" ", strip=True))
+        for heading in soup.select(".modalFilterCol .storeInfoRow .storeColName")
+    ]
+    if compact(name) in detail_names:
+        return "present"
+    result_names = [
+        compact(heading.get_text(" ", strip=True))
+        for heading in soup.select(".resultColBox .storeColName")
+    ]
+    if compact(name) in result_names:
+        return "unknown"  # listed, but its machine details are missing
+    body = compact(soup.get_text(" ", strip=True))
+    if "指定された条件のお店は見つかりませんでした" in body or (
+        "検索結果0件" in body and not result_names
+    ):
+        return "absent"
+    # When other stores are listed, an absent target is meaningful only when
+    # this is a normal search results page with a complete result count.
+    if result_names and ("件" in body) and ("検索結果" in body or "あそべるお店" in body):
+        return "absent"
+    return "unknown"
+
+
+def newly_listed(current: dict[str, str], previous: dict[str, str]) -> list[str]:
+    """Only absent -> present is an appearance; unknown/first sight are not."""
+    return [name for name, status in current.items()
+            if status == "present" and previous.get(name) == "absent"]
+
+
 def fetch_page(url: str) -> tuple[bytes, datetime]:
     response = requests.get(
         url,
@@ -162,7 +198,7 @@ def alert_needed(machine: Machine, last_alerted: dict[str, str]) -> bool:
     return machine.updated_at > old
 
 
-def notification_text(items: list[Machine], unavailable: set[str] | None = None) -> str:
+def notification_text(items: list[Machine], unavailable: set[str] | None = None, absent: set[str] | None = None) -> str:
     """Full four-store status, in the requested order, not only changed machines."""
     ordered_names = (
         "タイトーステーション 国分寺店",
@@ -171,6 +207,7 @@ def notification_text(items: list[Machine], unavailable: set[str] | None = None)
         "namcoららぽーと立川立飛おまけ横丁店",
     )
     unavailable = unavailable or set()
+    absent = absent or set()
     lines = []
     for name in ordered_names:
         store_items = sorted(
@@ -178,6 +215,9 @@ def notification_text(items: list[Machine], unavailable: set[str] | None = None)
             key=lambda item: item.number,
         )
         if not store_items:
+            if name in absent:
+                lines.extend([name, "取扱店舗への掲載なし", "", ""])
+                continue
             if name in unavailable:
                 lines.extend([name, "情報取得不可", "", ""])
                 continue
@@ -223,7 +263,9 @@ def run() -> int:
     state = load_state()
     errors: list[str] = []
     unavailable: set[str] = set()
+    absent: set[str] = set()
     machines: list[Machine] = []
+    current_status: dict[str, str] = {}
     for url, names in PAGES.items():
         try:
             html, checked_at = fetch_page(url)
@@ -232,37 +274,64 @@ def run() -> int:
             unavailable.update(names)
             continue
         for name in names:
+            status = store_listing_status(html, name)
+            if status == "absent":
+                current_status[name] = "absent"
+                absent.add(name)
+                print(f"{name} / 取扱店舗への掲載なし")
+                continue
+            if status == "unknown":
+                unavailable.add(name)
+                print(f"{name} / 情報取得不可（掲載を判定できません）")
+                continue
             try:
                 found = parse_store_page(html, url, (name,), checked_at)
                 machines.extend(found)
+                current_status[name] = "present"
                 print(f"OK: {name}: {len(found)}台を解析")
             except (ParseError, UnicodeError) as exc:
                 errors.append(f"{name}: {exc}")
                 unavailable.add(name)
 
+    previous_status = state.get("store_presence", {})
+    if not isinstance(previous_status, dict):
+        raise RuntimeError("店舗掲載履歴の形式が不正です")
+    appeared = newly_listed(current_status, previous_status)
     ready = [machine for machine in machines if alert_needed(machine, state["last_alerted"])]
     for machine in machines:
         target = "通知対象" if machine in ready else "対象外"
         print(f"{machine.store} / {machine.number}台目 / {machine.label} / {target}")
     for name in sorted(unavailable):
         print(f"{name} / 情報取得不可")
+    for name in appeared:
+        print(f"{name} / 取扱店舗への掲載を再検知")
 
-    if ready or status_request:
+    if ready or appeared or status_request:
         if machines:
-            message = notification_text(machines, unavailable)
+            message = notification_text(machines, unavailable, absent)
+            if appeared:
+                message = "【取扱店舗に掲載されました】 " + "、".join(appeared) + "\\n\\n" + message
             if len(message) > 2000:
                 raise RuntimeError("Discord通知文が2000文字を超えました")
             send_discord(webhook, message)
             if not status_request:
                 for machine in ready:
                     state["last_alerted"][machine.key] = machine.updated_at.isoformat()
-                save_state(state)
             print("現在状況をDiscordへ送信しました" if status_request else
-                  f"新しい更新 {len(ready)}台を検知し、取得できた店舗の状況をDiscordへ通知しました")
+                  f"更新 {len(ready)}台 / 新規掲載 {len(appeared)}店舗をDiscordへ通知しました")
         else:
-            print("全店舗の取得に失敗したため通知しません")
+            print("取得できる筐体がないため通知しません")
     else:
         print("新しい通知対象はありません")
+
+    # Always persist definite observations. Unknown must never overwrite a
+    # previous known presence state (e.g. a temporary network error).
+    for name, status in current_status.items():
+        if not status_request:
+            previous_status[name] = status
+    if not status_request:
+        state["store_presence"] = previous_status
+        save_state(state)
 
     for message in errors:
         print(f"WARNING: {message}", file=sys.stderr)
