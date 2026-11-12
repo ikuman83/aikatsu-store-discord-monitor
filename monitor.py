@@ -147,9 +147,9 @@ def store_listing_status(html: str | bytes, name: str) -> str:
 
 
 def newly_listed(current: dict[str, str], previous: dict[str, str]) -> list[str]:
-    """Only absent -> present is an appearance; unknown/first sight are not."""
+    """Notify on first confirmed listing or return from confirmed absence."""
     return [name for name, status in current.items()
-            if status == "present" and previous.get(name) == "absent"]
+            if status == "present" and previous.get(name) != "present"]
 
 
 def fetch_page(url: str) -> tuple[bytes, datetime]:
