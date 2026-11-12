@@ -50,9 +50,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out default branch
+      - name: Check out latest state from main
         uses: actions/checkout@v4
         with:
+          ref: main
           persist-credentials: true
       - name: Set up Python
         uses: actions/setup-python@v5
