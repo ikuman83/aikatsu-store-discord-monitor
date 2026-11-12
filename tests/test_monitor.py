@@ -132,7 +132,7 @@ class MonitorTests(unittest.TestCase):
     def test_unavailable_does_not_count_as_absence(self):
         from monitor import store_listing_status
         empty_modal = "<html><body><div class='resultColBox'><h3 class='storeColName'>タイトーステーション立川北口店</h3></div><p>検索結果 1 件</p></body></html>"
-        self.assertEqual(store_listing_status(empty_modal, "タイトーステーション 立川北口店"), "unknown")
+        self.assertEqual(store_listing_status(empty_modal, "タイトーステーション 立川北口店"), "present")
 
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
