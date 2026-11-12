@@ -163,6 +163,28 @@ class MonitorTests(unittest.TestCase):
         """
         self.assertEqual(store_listing_status(html, "ビックカメラ立川店"), "unknown")
 
+    def test_delayed_store_update_is_detected_beyond_60_minutes(self):
+        from monitor import updated_since_last_observation
+        old = self.now - timedelta(hours=14)
+        new = self.now - timedelta(hours=3)
+        machine = Machine("A", 1, "3時間前", TACHIKAWA_URL, self.now, new)
+        self.assertFalse(alert_needed(machine, {}))
+        self.assertEqual(
+            updated_since_last_observation([machine], {machine.key: old.isoformat()}),
+            [machine],
+        )
+        self.assertEqual(updated_since_last_observation([machine], {}), [])
+        self.assertEqual(
+            updated_since_last_observation([machine], {machine.key: new.isoformat()}),
+            [],
+        )
+
+    def test_listing_alert_detects_first_known_listing(self):
+        from monitor import newly_listed
+        current = {"namcoららぽーと立川立飛おまけ横丁店": "present"}
+        self.assertEqual(newly_listed(current, {}), list(current))
+        self.assertEqual(newly_listed(current, current), [])
+
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_timestamp("unknown")
