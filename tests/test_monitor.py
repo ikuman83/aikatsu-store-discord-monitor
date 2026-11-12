@@ -134,6 +134,35 @@ class MonitorTests(unittest.TestCase):
         empty_modal = "<html><body><div class='resultColBox'><h3 class='storeColName'>タイトーステーション立川北口店</h3></div><p>検索結果 1 件</p></body></html>"
         self.assertEqual(store_listing_status(empty_modal, "タイトーステーション 立川北口店"), "present")
 
+    def test_toriatsukai_shop_current_page_format(self):
+        from monitor import store_listing_status
+        html = """
+        <html><head><title>取扱店舗｜アイカツ！アンコール公式サイト</title></head>
+        <body><h1>取扱店舗</h1><p>検索結果 <span>1</span> 件</p>
+        <div class="resultColBox"><h3 class="storeColName">
+        タイトーステーション 立川北口店</h3></div>
+        <div class="modalFilterCol"><div class="storeInfoRow"><h3 class="storeColName">
+        タイトーステーション 立川北口店</h3></div>
+        <ul class="runningList"><li class="runningItem">
+        <div class="runningItemNum"><span class="num">1</span></div>
+        <div class="runningItemTime"><span class="timeago" title="2026-10-2811:59:00">1分前</span></div>
+        </li></ul></div></body></html>
+        """
+        self.assertEqual(store_listing_status(html, "タイトーステーション 立川北口店"), "present")
+        self.assertEqual(store_listing_status(html, "ビックカメラ立川店"), "absent")
+        items = parse_store_page(html, TACHIKAWA_URL, ("タイトーステーション 立川北口店",), self.now)
+        self.assertEqual(len(items), 1)
+        self.assertTrue(alert_needed(items[0], {}))
+
+    def test_legacy_heading_no_longer_classifies_absence(self):
+        from monitor import store_listing_status
+        html = """
+        <html><body><h1>あそべるお店</h1><p>検索結果 1 件</p>
+        <div class="resultColBox"><h3 class="storeColName">別のお店</h3></div>
+        </body></html>
+        """
+        self.assertEqual(store_listing_status(html, "ビックカメラ立川店"), "unknown")
+
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_timestamp("unknown")
