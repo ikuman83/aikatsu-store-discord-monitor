@@ -145,7 +145,7 @@ class MonitorTests(unittest.TestCase):
         タイトーステーション 立川北口店</h3></div>
         <ul class="runningList"><li class="runningItem">
         <div class="runningItemNum"><span class="num">1</span></div>
-        <div class="runningItemTime"><span class="timeago" title="2026-10-2811:59:00">1分前</span></div>
+        <div class="runningItemTime"><span class="timeago" title="2026-10-2820:59:00">1分前</span></div>
         </li></ul></div></body></html>
         """
         self.assertEqual(store_listing_status(html, "タイトーステーション 立川北口店"), "present")
