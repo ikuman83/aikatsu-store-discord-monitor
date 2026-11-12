@@ -198,6 +198,26 @@ def alert_needed(machine: Machine, last_alerted: dict[str, str]) -> bool:
     return machine.updated_at > old
 
 
+def updated_since_last_observation(
+    machines: list[Machine], last_observed: dict[str, str]
+) -> list[Machine]:
+    """Catch up on updates missed while GitHub Actions did not run.
+
+    On a first sighting there is no baseline: never guess an old update was new.
+    """
+    result = []
+    for machine in machines:
+        old = last_observed.get(machine.key)
+        if not old:
+            continue
+        previous = datetime.fromisoformat(old.replace("Z", "+00:00"))
+        if previous.tzinfo is None:
+            raise RuntimeError("前回確認した更新日時のタイムゾーンが不正です")
+        if previous < machine.updated_at <= machine.checked_at:
+            result.append(machine)
+    return result
+
+
 def notification_text(items: list[Machine], unavailable: set[str] | None = None, absent: set[str] | None = None) -> str:
     """Full four-store status, in the requested order, not only changed machines."""
     ordered_names = (
@@ -297,7 +317,25 @@ def run() -> int:
     if not isinstance(previous_status, dict):
         raise RuntimeError("店舗掲載履歴の形式が不正です")
     appeared = newly_listed(current_status, previous_status)
-    ready = [machine for machine in machines if alert_needed(machine, state["last_alerted"])]
+    # Avoid repeated listing alerts when the official search briefly flickers
+    # between zero results and a populated result.
+    last_listing_alerted = state.get("last_listing_alerted", {})
+    if not isinstance(last_listing_alerted, dict):
+        raise RuntimeError("店舗掲載通知履歴の形式が不正です")
+    now = datetime.now(timezone.utc)
+    appeared = [
+        name for name in appeared
+        if not last_listing_alerted.get(name)
+        or now - datetime.fromisoformat(
+            last_listing_alerted[name].replace("Z", "+00:00")
+        ) >= timedelta(hours=24)
+    ]
+    last_observed = state.get("last_observed_updates", {})
+    if not isinstance(last_observed, dict):
+        raise RuntimeError("前回確認した筐体更新履歴の形式が不正です")
+    fresh = [machine for machine in machines if alert_needed(machine, state["last_alerted"])]
+    catch_up = updated_since_last_observation(machines, last_observed)
+    ready = list(dict.fromkeys([*fresh, *catch_up]))
     for machine in machines:
         target = "通知対象" if machine in ready else "対象外"
         print(f"{machine.store} / {machine.number}台目 / {machine.label} / {target}")
@@ -317,11 +355,18 @@ def run() -> int:
             if not status_request:
                 for machine in ready:
                     state["last_alerted"][machine.key] = machine.updated_at.isoformat()
+                for name in appeared:
+                    last_listing_alerted[name] = now.isoformat()
+                state["last_listing_alerted"] = last_listing_alerted
             print("現在状況をDiscordへ送信しました" if status_request else
                   f"更新 {len(ready)}台 / 新規掲載 {len(appeared)}店舗をDiscordへ通知しました")
         elif appeared:
             send_discord(webhook, "【取扱店舗に掲載されました】 " + "、".join(appeared) +
                          f"\n確認時間：{datetime.now(JST):%Y/%m/%d %H:%M} JST")
+            if not status_request:
+                for name in appeared:
+                    last_listing_alerted[name] = now.isoformat()
+                state["last_listing_alerted"] = last_listing_alerted
             print("掲載を検知した店舗のみDiscordに通知しました（筐体詳細は取得不可）")
         else:
             print("取得できる筐体がないため通知しません")
@@ -335,6 +380,16 @@ def run() -> int:
             previous_status[name] = status
     if not status_request:
         state["store_presence"] = previous_status
+        # Record the exact timestamps after every successful observation,
+        # not just when an alert was sent.
+        for machine in machines:
+            old = last_observed.get(machine.key)
+            if not old or machine.updated_at > datetime.fromisoformat(
+                old.replace("Z", "+00:00")
+            ):
+                last_observed[machine.key] = machine.updated_at.isoformat()
+        state["last_observed_updates"] = last_observed
+        state["last_checked_at"] = now.isoformat()
         save_state(state)
 
     for message in errors:
