@@ -133,7 +133,7 @@ def store_listing_status(html: str | bytes, name: str) -> str:
         for heading in soup.select(".resultColBox .storeColName")
     ]
     if compact(name) in result_names:
-        return "unknown"  # listed, but its machine details are missing
+        return "present"  # listed; machine details may still be unavailable
     body = compact(soup.get_text(" ", strip=True))
     if "指定された条件のお店は見つかりませんでした" in body or (
         "検索結果0件" in body and not result_names
@@ -284,10 +284,10 @@ def run() -> int:
                 unavailable.add(name)
                 print(f"{name} / 情報取得不可（掲載を判定できません）")
                 continue
+            current_status[name] = "present"
             try:
                 found = parse_store_page(html, url, (name,), checked_at)
                 machines.extend(found)
-                current_status[name] = "present"
                 print(f"OK: {name}: {len(found)}台を解析")
             except (ParseError, UnicodeError) as exc:
                 errors.append(f"{name}: {exc}")
@@ -319,6 +319,10 @@ def run() -> int:
                     state["last_alerted"][machine.key] = machine.updated_at.isoformat()
             print("現在状況をDiscordへ送信しました" if status_request else
                   f"更新 {len(ready)}台 / 新規掲載 {len(appeared)}店舗をDiscordへ通知しました")
+        elif appeared:
+            send_discord(webhook, "【取扱店舗に掲載されました】 " + "、".join(appeared) +
+                         f"\\n確認時間：{datetime.now(JST):%Y/%m/%d %H:%M} JST")
+            print("掲載を検知した店舗のみDiscordに通知しました（筐体詳細は取得不可）")
         else:
             print("取得できる筐体がないため通知しません")
     else:
