@@ -110,6 +110,30 @@ class MonitorTests(unittest.TestCase):
         self.assertIn("ビックカメラ立川店", result)
         self.assertIn("タイトーステーション 国分寺店", result)
 
+    def test_store_listing_presence_transitions(self):
+        from monitor import store_listing_status, newly_listed
+        self.assertEqual(
+            store_listing_status(HTML, "タイトーステーション 立川北口店"), "present"
+        )
+        missing = "<html><body><p>検索結果 <span>0</span> 件</p><p>指定された条件のお店は見つかりませんでした。</p></body></html>"
+        self.assertEqual(
+            store_listing_status(missing, "タイトーステーション 立川北口店"), "absent"
+        )
+        error_page = "<html><body>メンテナンス中</body></html>"
+        self.assertEqual(
+            store_listing_status(error_page, "タイトーステーション 立川北口店"), "unknown"
+        )
+        current = {"店A": "present", "店B": "absent", "店C": "present"}
+        previous = {"店A": "absent", "店B": "present", "店C": "present"}
+        self.assertEqual(newly_listed(current, previous), ["店A"])
+        self.assertEqual(newly_listed({"店A": "present"}, {}), ["店A"])
+        self.assertEqual(newly_listed({"店A": "present"}, {"店A": "present"}), [])
+
+    def test_unavailable_does_not_count_as_absence(self):
+        from monitor import store_listing_status
+        empty_modal = "<html><body><div class='resultColBox'><h3 class='storeColName'>タイトーステーション立川北口店</h3></div><p>検索結果 1 件</p></body></html>"
+        self.assertEqual(store_listing_status(empty_modal, "タイトーステーション 立川北口店"), "unknown")
+
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_timestamp("unknown")
