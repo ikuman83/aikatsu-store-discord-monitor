@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watch four Aikatsu Encore stores and notify Discord about fresh changes."""
+"""Watch the official 取扱店舗 listings for store appearances and machine updates."""
 
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def parse_store_page(
 ) -> list[Machine]:
     soup = BeautifulSoup(html, "html.parser")
     machines: list[Machine] = []
-    # The search results only list the stores. Machine information is in
+    # 取扱店舗 results link to detailed machine status in the same page. Details are in
     # div.modalFilterCol -> ul.runningList -> li.runningItem.
     modals = soup.select("div.modalFilterCol")
     for name in names:
@@ -117,7 +117,7 @@ def parse_store_page(
 
 
 def store_listing_status(html: str | bytes, name: str) -> str:
-    """Return present/absent/unknown based only on a complete store-search page.
+    """Return present/absent/unknown from the official 取扱店舗 search page.
 
     A missing modal alone is not proof a store is no longer listed.
     """
@@ -141,7 +141,7 @@ def store_listing_status(html: str | bytes, name: str) -> str:
         return "absent"
     # When other stores are listed, an absent target is meaningful only when
     # this is a normal search results page with a complete result count.
-    if result_names and ("件" in body) and ("検索結果" in body or "あそべるお店" in body):
+    if result_names and "検索結果" in body and "取扱店舗" in body and "件" in body:
         return "absent"
     return "unknown"
 
@@ -310,7 +310,7 @@ def run() -> int:
         if machines:
             message = notification_text(machines, unavailable, absent)
             if appeared:
-                message = "【取扱店舗に掲載されました】 " + "、".join(appeared) + "\\n\\n" + message
+                message = "【取扱店舗に掲載されました】 " + "、".join(appeared) + "\n\n" + message
             if len(message) > 2000:
                 raise RuntimeError("Discord通知文が2000文字を超えました")
             send_discord(webhook, message)
@@ -321,7 +321,7 @@ def run() -> int:
                   f"更新 {len(ready)}台 / 新規掲載 {len(appeared)}店舗をDiscordへ通知しました")
         elif appeared:
             send_discord(webhook, "【取扱店舗に掲載されました】 " + "、".join(appeared) +
-                         f"\\n確認時間：{datetime.now(JST):%Y/%m/%d %H:%M} JST")
+                         f"\n確認時間：{datetime.now(JST):%Y/%m/%d %H:%M} JST")
             print("掲載を検知した店舗のみDiscordに通知しました（筐体詳細は取得不可）")
         else:
             print("取得できる筐体がないため通知しません")
