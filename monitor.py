@@ -297,7 +297,7 @@ def store_notification(name: str, machines: list[Machine], checked_at: datetime)
 
 def run_daily(webhook: str, schedule: str) -> int:
     if schedule not in {"0 23 * * *", "30,40,50 0 * * *",
-                        "0,10,20,30,40,50 1 * * *"}:
+                        "0,10,20,30,40 1 * * *", "50 1 * * *"}:
         raise RuntimeError(f"未対応のスケジュール: {schedule}")
     checked_at = datetime.now(timezone.utc)
     today = checked_at.astimezone(JST).date().isoformat()
