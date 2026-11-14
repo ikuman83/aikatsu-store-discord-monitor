@@ -262,6 +262,118 @@ def send_discord(webhook: str, message: str) -> None:
     response.raise_for_status()
 
 
+
+DAILY_STORES = (
+    "タイトーステーション 国分寺店",
+    "タイトーステーション 立川北口店",
+    "ビックカメラ立川店",
+    "namcoららぽーと立川立飛おまけ横丁店",
+)
+
+
+def daily_newer_stores(current: list[Machine], baseline: dict[str, str],
+                       already_alerted: set[str]) -> list[str]:
+    """Compare official timestamps to 08:00; alert at most once per store/day."""
+    changed = set()
+    for m in current:
+        old = baseline.get(m.key)
+        if not old or m.store in already_alerted:
+            continue
+        previous = datetime.fromisoformat(old.replace("Z", "+00:00"))
+        if previous.tzinfo is None:
+            raise RuntimeError("基準日時にタイムゾーンがありません")
+        if previous < m.updated_at <= m.checked_at:
+            changed.add(m.store)
+    return [name for name in DAILY_STORES if name in changed]
+
+
+def store_notification(name: str, machines: list[Machine], checked_at: datetime) -> str:
+    lines = [name]
+    for m in sorted((m for m in machines if m.store == name), key=lambda x: x.number):
+        lines.append(f"{m.number}台目【稼働】 {m.label}")
+    lines.extend(["", f"確認時間：{checked_at.astimezone(JST):%Y/%m/%d %H:%M} JST"])
+    return "\n".join(lines)
+
+
+def run_daily(webhook: str, schedule: str) -> int:
+    if schedule not in {"0 23 * * *", "30,40,50 0 * * *",
+                        "0,10,20,30,40,50 1 * * *"}:
+        raise RuntimeError(f"未対応のスケジュール: {schedule}")
+    checked_at = datetime.now(timezone.utc)
+    today = checked_at.astimezone(JST).date().isoformat()
+    state = load_state()
+    daily = state.get("daily_monitor", {})
+    if not isinstance(daily, dict):
+        raise RuntimeError("日次監視履歴が不正です")
+    if daily.get("date") != today:
+        daily = {"date": today, "baseline": {}, "alerted_stores": [], "summary_sent": False}
+    machines: list[Machine] = []
+    unavailable: set[str] = set()
+    absent: set[str] = set()
+    for url, names in PAGES.items():
+        try:
+            html, fetched_at = fetch_page(url)
+        except (requests.RequestException, UnicodeError) as exc:
+            print(f"WARNING: {url}: {exc}", file=sys.stderr)
+            unavailable.update(names)
+            continue
+        for name in names:
+            presence = store_listing_status(html, name)
+            if presence == "absent":
+                absent.add(name)
+            elif presence != "present":
+                unavailable.add(name)
+            else:
+                try:
+                    machines.extend(parse_store_page(html, url, (name,), fetched_at))
+                except (ParseError, UnicodeError) as exc:
+                    print(f"WARNING: {name}: {exc}", file=sys.stderr)
+                    unavailable.add(name)
+
+    if schedule == "0 23 * * *":
+        if not daily.get("baseline_checked_at"):
+            daily["baseline"] = {m.key: m.updated_at.isoformat() for m in machines}
+            daily["baseline_checked_at"] = checked_at.isoformat()
+            daily["alerted_stores"] = []
+            daily["summary_sent"] = False
+            print(f"08:00基準を記録: {len(machines)}台")
+        else:
+            print("本日の08:00基準は記録済みです")
+    else:
+        baseline = daily.get("baseline", {})
+        if not isinstance(baseline, dict):
+            raise RuntimeError("08:00基準の形式が不正です")
+        alerted = set(daily.get("alerted_stores", []))
+        for name in daily_newer_stores(machines, baseline, alerted):
+            send_discord(webhook, store_notification(name, machines, checked_at))
+            alerted.add(name)
+            daily["alerted_stores"] = sorted(alerted)
+            state["daily_monitor"] = daily
+            save_state(state)
+            print(f"08:00より更新: {name}（全筐体を通知）")
+        if not baseline:
+            print("本日の08:00基準がないため差分通知を省略します")
+        # Scheduled 10:50 run. GitHub Actions may be delayed; slot is read
+        # from event.schedule, not inferred from actual wall-clock time.
+        event_slot = os.environ.get("MONITOR_FINAL_SLOT", "")
+        if event_slot == "true" and not daily.get("summary_sent"):
+            message = "【本日の稼働状況】\n\n" + notification_text(
+                machines, unavailable, absent
+            )
+            if len(message) > 2000:
+                raise RuntimeError("Discord通知文が2000文字を超えました")
+            send_discord(webhook, message)
+            daily["summary_sent"] = True
+            print("10:50最終集計を送信しました")
+    daily["last_checked_at"] = checked_at.isoformat()
+    state["daily_monitor"] = daily
+    save_state(state)
+    for name in DAILY_STORES:
+        count = sum(m.store == name for m in machines)
+        print(f"{name}: {count}台" if count else f"{name}: 情報取得不可/掲載なし")
+    return 0
+
+
 def run() -> int:
     webhook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
     if not webhook.startswith((
@@ -278,6 +390,10 @@ def run() -> int:
         )
         print("Discordへのテスト通知を送信しました（履歴は変更しません）")
         return 0
+
+    schedule = os.environ.get("MONITOR_SCHEDULE", "").strip()
+    if schedule:
+        return run_daily(webhook, schedule)
 
     status_request = os.environ.get("STATUS_REQUEST", "").lower() in {"1", "true", "yes"}
     state = load_state()
