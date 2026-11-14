@@ -12,7 +12,8 @@ on:
     # UTC: 23:00 = 翌日08:00 JST; 00:30–01:50 = 09:30–10:50 JST.
     - cron: '0 23 * * *'
     - cron: '30,40,50 0 * * *'
-    - cron: '0,10,20,30,40,50 1 * * *'
+    - cron: '0,10,20,30,40 1 * * *'
+    - cron: '50 1 * * *'
   workflow_dispatch:
     inputs:
       status_now:
@@ -69,6 +70,7 @@ jobs:
           TEST_NOTIFICATION: ${{ inputs.send_test }}
           STATUS_REQUEST: ${{ inputs.status_now }}
           MONITOR_SCHEDULE: ${{ github.event.schedule }}
+          MONITOR_FINAL_SLOT: ${{ github.event.schedule == '50 1 * * *' }}
         run: python monitor.py
       - name: Save alert history on default branch
         if: ${{ always() && !inputs.send_test && !inputs.status_now }}
