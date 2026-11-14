@@ -185,6 +185,33 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(newly_listed(current, {}), list(current))
         self.assertEqual(newly_listed(current, current), [])
 
+    def test_daily_baseline_detects_only_newer_machine_and_one_store(self):
+        from monitor import daily_newer_stores, store_notification
+        name = "タイトーステーション 立川北口店"
+        old = self.now - timedelta(hours=18)
+        new = self.now - timedelta(hours=1)
+        baseline = {f"{name}::1": old.isoformat(),
+                    f"{name}::2": old.isoformat()}
+        machines = [
+            Machine(name, 1, "1時間前", TACHIKAWA_URL, self.now, new),
+            Machine(name, 2, "19時間前", TACHIKAWA_URL, self.now, old),
+        ]
+        self.assertEqual(daily_newer_stores(machines, baseline, set()), [name])
+        self.assertEqual(daily_newer_stores(machines, baseline, {name}), [])
+        self.assertEqual(daily_newer_stores(machines, {}, set()), [])
+        msg = store_notification(name, machines, self.now)
+        self.assertIn("1台目【稼働】 1時間前", msg)
+        self.assertIn("2台目【稼働】 19時間前", msg)
+        self.assertIn("確認時間：", msg)
+
+    def test_daily_unchanged_age_is_not_an_update(self):
+        from monitor import daily_newer_stores
+        name = "タイトーステーション 国分寺店"
+        old = self.now - timedelta(hours=18)
+        m = Machine(name, 1, "19時間前", KOKUBUNJI_URL,
+                    self.now + timedelta(hours=1), old)
+        self.assertEqual(daily_newer_stores([m], {m.key: old.isoformat()}, set()), [])
+
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_timestamp("unknown")
