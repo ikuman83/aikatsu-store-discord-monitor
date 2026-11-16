@@ -37,7 +37,20 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Deploy Worker (1-minute Cron)
-        run: npx wrangler deploy --config wrangler.runtime.toml
+        # The first upload can create the Worker before its deployment endpoint is ready.
+        # Retry deployment to recover from temporary Cloudflare 10007 responses.
+        run: |
+          for attempt in 1 2 3; do
+            if npx wrangler deploy --config wrangler.runtime.toml; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo 'Worker deployment failed after 3 attempts' >&2
+              exit 1
+            fi
+            echo "Cloudflare deployment not ready (attempt $attempt/3). Retrying..."
+            sleep $((attempt * 15))
+          done
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
