@@ -1,0 +1,13 @@
+name = "aikatsu-encore-monitor"
+main = "src/index.mjs"
+compatibility_date = "2026-11-16"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "aikatsu-encore-monitor-state"
+database_id = "REPLACE_WITH_YOUR_D1_UUID"
+migrations_dir = "migrations"
