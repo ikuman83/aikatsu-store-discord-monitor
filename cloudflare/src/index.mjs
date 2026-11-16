@@ -1,3 +1,5 @@
+import {handleDiscordInteraction} from './discord.mjs';
+
 /**
  * アイカツ！アンコール 取扱店舗監視 - Cloudflare Workers + D1.
  * Every minute, fetch only the two official pages and compare changes.
@@ -210,9 +212,39 @@ export async function scan(env,checkedAt=new Date().toISOString()){
   });
 }
 
+/**
+ * Read current official data independently of the one-minute monitor.
+ * A user-triggered /状況 never changes stored state or creates update alerts.
+ */
+export async function readLiveStoreStatus() {
+  const checkedAt = new Date().toISOString();
+  const pages = [TACHIKAWA_URL, KOKUBUNJI_URL];
+  const results = await Promise.allSettled(pages.map(async url =>
+    parseOfficialPage(await fetchOfficial(url), url, checkedAt)
+  ));
+  const snapshot = new Map();
+  let goodPages = 0;
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].status === 'fulfilled') {
+      goodPages++;
+      for (const [name, entry] of results[i].value) snapshot.set(name, entry);
+    } else {
+      console.warn('Status command could not fetch official page:',pages[i],
+        String(results[i].reason));
+    }
+  }
+  if (!goodPages) throw Error('Both official store search pages failed');
+  let formatted = formatNotification(snapshot, checkedAt);
+  if (goodPages < pages.length)
+    formatted += '\n※一部店舗の最新情報を取得できませんでした。';
+  return formatted;
+}
+
 export default {
   async scheduled(_controller,env,ctx){ctx.waitUntil(scan(env));},
-  async fetch(request,env){
+  async fetch(request,env,ctx){
+    if(new URL(request.url).pathname === '/discord')
+      return handleDiscordInteraction(request, env, ctx, readLiveStoreStatus);
     if(request.method!=='GET'||new URL(request.url).pathname!=='/health')
       return new Response('Not found',{status:404});
     if(!env.DB)return Response.json({status:'configuration_missing'},{status:503});
