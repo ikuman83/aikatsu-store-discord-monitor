@@ -1,0 +1,37 @@
+name: Test Cloudflare one-minute monitor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/**'
+      - '.github/workflows/test-cloudflare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Unit tests
+        run: npm test
+      - name: Syntax validation
+        run: |
+          node --check src/index.mjs
+          node --check setup.mjs
+      - name: Cloudflare Wrangler bundle validation (no deployment)
+        run: |
+          sed 's/REPLACE_WITH_YOUR_D1_UUID/00000000-0000-4000-8000-000000000001/' wrangler.toml > wrangler.ci.toml
+          npx wrangler deploy --dry-run --config wrangler.ci.toml --outdir /tmp/aikatsu-cf-build
