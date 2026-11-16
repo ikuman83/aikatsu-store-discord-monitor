@@ -28,6 +28,27 @@
 
 **このテストは実店舗の更新検出ではなく、Cloudflare→D1→Discordの送信経路の検証**です。成功を確認できるまでは旧GitHub監視を停止しないでください。
 
+## Discordから手動確認する `/aikatsu` コマンド
+
+Cloudflare Workerの `/discord` エンドポイントは、署名が正しいDiscordリクエストのみを受信します。`/aikatsu` で公式「取扱店舗」の2ページを再取得し、監視対象4店舗の一覧と確認時間をDiscordに返信します。定期監視の履歴や通知判定は変更しません。
+
+### 初回セットアップ
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) でアプリを作成（Webhookだけではスラッシュコマンドを受信できません）。
+2. アプリの General Information で **Application ID** と **Public Key** を確認し、Bot ページで **Bot Token** を取得します。Bot Token は公開しないでください。スクリーンショットにも写さないこと。
+3. [GitHubのActions Secrets](https://github.com/ikuman83/aikatsu-store-discord-monitor/settings/secrets/actions)に次の3つを追加します。
+   - `DISCORD_APPLICATION_ID`：Application ID
+   - `DISCORD_PUBLIC_KEY`：Public Key（64桁の16進数）
+   - `DISCORD_BOT_TOKEN`：Bot Token
+   - 任意で `DISCORD_GUILD_ID`（特定サーバーにのみコマンドを登録したい場合）
+4. [Configure Discord /aikatsu command](https://github.com/ikuman83/aikatsu-store-discord-monitor/actions/workflows/configure-discord-aikatsu.yml) の **Run workflow** を実行します。既存のCloudflare Workerを再デプロイして公開鍵を登録し、Discord APIへ `aikatsu` コマンドを登録します。既存のCronは維持します。
+5. Discord Developer Portal の **General Information → Interactions Endpoint URL** に、次のURLを設定し、検証・保存します。
+   `https://aikatsu-encore-monitor.ikuman83.workers.dev/discord`
+6. 同アプリの Installation 設定でサーバーへのインストール（`applications.commands` 権限）を許可し、目的のDiscordサーバーへ追加します。GitHubの登録ログにもインストールURLが表示されます。
+7. Discordで `/aikatsu` を入力し、公式サイトの最新情報が返信されることを確認してください。
+
+注意：本番での `/aikatsu` 応答はまだ確認できていません。GitHubのテストは、Discord署名検証・遅延返信・従来コマンドを受け付けない動作まで検証します。GitHub SecretsやBot Tokenをこのチャットに貼らないでください。
+
 ## 通知仕様
 
 - 公式の「取扱店舗」に再掲載されたとき：筐体の更新時刻が古くても通知
