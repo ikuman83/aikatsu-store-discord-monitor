@@ -1,3 +1,4 @@
+/** Legacy prototype: not deployed. Active /aikatsu handler is cloudflare/src/discord.mjs. */
 import { createPublicKey, verify } from 'node:crypto';
 import { waitUntil } from '@vercel/functions';
 import * as cheerio from 'cheerio';
@@ -71,7 +72,7 @@ async function respondLater(interaction) {
     content=formatStatus(await fetchAll());
   } catch (err) {
     console.error('Unable to fetch store status:',err);
-    content='公式サイトから最新情報を取得できませんでした。時間をおいて再度 /状況 を実行してください。';
+    content='公式サイトから最新情報を取得できませんでした。時間をおいて再度 /aikatsu を実行してください。';
   }
   const result=await fetch(endpoint,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,allowed_mentions:{parse:[]}})});
   if (!result.ok) console.error('Discord status reply failed:',result.status,await result.text());
@@ -88,7 +89,7 @@ export default async function handler(req,res) {
     if (!checkSignature(req,rawBody)) return res.status(401).send('Invalid signature');
     const interaction=JSON.parse(rawBody);
     if (interaction.type===1) return res.status(200).json({type:1});
-    if (interaction.type!==2 || interaction.data?.name!=='状況') {
+    if (interaction.type!==2 || interaction.data?.name!=='aikatsu') {
       return res.status(200).json({type:4,data:{content:'未対応のコマンドです。',flags:64}});
     }
     waitUntil(respondLater(interaction));
