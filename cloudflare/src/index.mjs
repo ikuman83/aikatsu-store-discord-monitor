@@ -89,7 +89,7 @@ export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
       nextStores.push({name:store.name,status:missing>=2?'absent':(old?.status||'absent'),missing});
       continue;
     }
-    if(old?.status!=='present')events.push('listing:'+store.name);
+    if(old?.status!=='present')events.push('listing:'+store.name+':'+(old?.checked_at||'initial'));
     nextStores.push({name:store.name,status:'present',missing:0});
     for(const m of item.machines||[]){
       const key=store.name+'::'+m.number;
@@ -105,7 +105,7 @@ export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
 
 export function formatNotification(snapshot,checkedAt,events=[]){
   const lines=[];
-  const listing=events.filter(e=>e.startsWith('listing:')).map(e=>e.slice(8));
+  const listing=events.filter(e=>e.startsWith('listing:')).map(e=>e.slice(8).split(':')[0]);
   if(listing.length)lines.push('取扱店舗に掲載：'+listing.join('、'),'');
   for(const store of STORES){
     lines.push(store.name);
@@ -176,7 +176,7 @@ export async function scan(env,checkedAt=new Date().toISOString()){
       else console.warn('Official search fetch failed',urls[i],String(fetched[i].reason));
     }
     const [stores,machines]=await Promise.all([
-      env.DB.prepare('SELECT name,status,missing_count FROM store_state').all(),
+      env.DB.prepare('SELECT name,status,missing_count,checked_at FROM store_state').all(),
       env.DB.prepare('SELECT id,updated_at FROM machine_state').all(),
     ]);
     const prevStores=new Map((stores.results||[]).map(r=>[r.name,r]));
@@ -219,7 +219,7 @@ export default {
     const row=await env.DB.prepare("SELECT value FROM health WHERE key='last_scan'").first();
     if(!row)return Response.json({status:'not_started'},{status:503});
     const entry=JSON.parse(row.value);
-    const current=Date.now()-new Date(entry.at).getTime()<180000?'ok':'stale';
+    const current=Date.now()-new Date(entry.at).getTime()>=180000?'stale':entry.status==='unavailable'?'unavailable':'ok';
     return Response.json({status:current,last_scan:entry.at,scan_status:entry.status},
       {status:current==='ok'?200:503,headers:{'cache-control':'no-store'}});
   },
