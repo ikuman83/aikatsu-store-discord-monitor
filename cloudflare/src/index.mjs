@@ -214,7 +214,7 @@ export async function scan(env,checkedAt=new Date().toISOString()){
 
 /**
  * Read current official data independently of the one-minute monitor.
- * A user-triggered /状況 never changes stored state or creates update alerts.
+ * A user-triggered /aikatsu never changes stored state or creates update alerts.
  */
 export async function readLiveStoreStatus() {
   const checkedAt = new Date().toISOString();
