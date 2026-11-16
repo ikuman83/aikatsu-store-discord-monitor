@@ -61,7 +61,7 @@ export async function handleDiscordInteraction(request, env, ctx, getStatus, fet
   let interaction;
   try {interaction=JSON.parse(raw);} catch {return new Response('Bad JSON',{status:400});}
   if (interaction.type === 1) return Response.json({type:1});
-  if (interaction.type !== 2 || interaction.data?.name !== '状況')
+  if (interaction.type !== 2 || interaction.data?.name !== 'aikatsu')
     return message('このコマンドには対応していません。',true);
   if (!ctx?.waitUntil) return new Response('Execution context unavailable',{status:503});
   ctx.waitUntil((async () => {
@@ -70,7 +70,7 @@ export async function handleDiscordInteraction(request, env, ctx, getStatus, fet
       content = await getStatus();
     } catch (err) {
       console.error('Current official store status could not be obtained:',String(err));
-      content = '公式サイトから最新情報を取得できませんでした。時間を置いて再度 /状況 を実行してください。';
+      content = '公式サイトから最新情報を取得できませんでした。時間を置いて再度 /aikatsu を実行してください。';
     }
     try {
       await editDeferredReply(interaction,content,fetchFn);
