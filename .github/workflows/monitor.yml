@@ -48,7 +48,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
 
   check:
-    needs: [unit-tests]
+    # Scheduled checks must not depend on the push-only unit-tests job.
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
