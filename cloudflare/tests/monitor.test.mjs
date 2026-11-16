@@ -19,7 +19,7 @@ test('reappearance notification works even when machine last update is old',()=>
     {store:bic.name,number:1,label:'15時間前',updatedAt:'2026-11-15T10:00:00.000Z'},
   ]}]]);
   const state=new Map([[bic.name,{status:'absent',missing_count:2}]]);
-  assert.deepEqual(chooseEvents(snapshot,state,new Map(),checkedAt).events,['listing:'+bic.name]);
+  assert.deepEqual(chooseEvents(snapshot,state,new Map(),checkedAt).events,['listing:'+bic.name+':initial']);
 });
 test('same timestamp is not repeatedly notified',()=>{
   const snapshot=new Map([[bic.name,sample]]);
@@ -42,10 +42,10 @@ test('requires two confirmed absent polls to reset presence',()=>{
 });
 test('first listed sighting sends only one listing event',()=>{
   const events=chooseEvents(new Map([[bic.name,sample]]),new Map(),new Map(),checkedAt).events;
-  assert.deepEqual(events,['listing:'+bic.name]);
+  assert.deepEqual(events,['listing:'+bic.name+':initial']);
 });
 test('notification stays simple, formatted and below Discord character limit',()=>{
-  const text=formatNotification(new Map([[bic.name,sample]]),checkedAt,['listing:'+bic.name]);
+  const text=formatNotification(new Map([[bic.name,sample]]),checkedAt,['listing:'+bic.name+':initial']);
   assert.match(text,/取扱店舗に掲載：ビックカメラ立川店/);
   assert.match(text,/ビックカメラ立川店\n1台目【稼働】 5分前/);
   assert.match(text,/確認時間：/);
