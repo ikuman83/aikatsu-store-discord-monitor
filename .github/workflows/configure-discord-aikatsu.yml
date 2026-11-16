@@ -1,0 +1,70 @@
+name: Configure Discord /aikatsu command
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aikatsu-cloudflare-deploy
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate required secrets
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DISCORD_PUBLIC_KEY: ${{ secrets.DISCORD_PUBLIC_KEY }}
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: |
+          for name in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN DISCORD_PUBLIC_KEY DISCORD_APPLICATION_ID DISCORD_BOT_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "Required GitHub Secret $name is missing." >&2
+              exit 1
+            fi
+          done
+      - name: Install Wrangler
+        run: npm install --ignore-scripts
+      - name: Run automated tests
+        run: npm test
+      - name: Resolve existing Cloudflare D1 database
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node setup.mjs
+      - name: Deploy Worker with /aikatsu endpoint (Cron maintained)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.runtime.toml
+      - name: Install Discord verification public key into Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DISCORD_PUBLIC_KEY: ${{ secrets.DISCORD_PUBLIC_KEY }}
+        run: printf '%s' "$DISCORD_PUBLIC_KEY" | npx wrangler secret put DISCORD_PUBLIC_KEY --config wrangler.runtime.toml
+      - name: Register /aikatsu command
+        env:
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+        run: node register-discord-command.mjs
+      - name: Setup guidance
+        run: |
+          echo "The /aikatsu endpoint is deployed and the command registered."
+          echo "Set Discord Developer Portal > General Information > Interactions Endpoint URL to:"
+          echo "https://aikatsu-encore-monitor.ikuman83.workers.dev/discord"
+          echo "Then install the app in your Discord server with the applications.commands permission."
