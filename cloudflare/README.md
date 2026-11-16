@@ -14,6 +14,20 @@
 5. デプロイログのworkers.dev URLに /health を付けて開きます。Cron開始後に status: ok が表示され、実行時刻を確認できます。Cron反映には最大15分程度かかることがあります。
 6. CloudflareのCronとDiscord通知が本番で正常に動くことを確認してから、旧GitHub Actions監視を停止してください。公開確認前には停止しません。
 
+## Discordへの実送信テスト（旧監視を止める前に実施）
+
+[GitHub Actions: Test Cloudflare Discord delivery](https://github.com/ikuman83/aikatsu-store-discord-monitor/actions/workflows/test-cloudflare-delivery.yml) で Run workflow を一度実行してください。
+
+このワークフローは次を検証します。
+
+1. Workerの /health が ok / complete である
+2. D1に1件のテスト通知を投入できる
+3. 次のCloudflare Cron実行が通知をDiscordへ送り、送信済みをD1に記録する
+
+テスト成功時にはGitHub Actionsで緑色のチェックが表示され、Discordに「🧪 Cloudflare Workersからのテスト通知です。」というメッセージが届きます。
+
+**このテストは実店舗の更新検出ではなく、Cloudflare→D1→Discordの送信経路の検証**です。成功を確認できるまでは旧GitHub監視を停止しないでください。
+
 ## 通知仕様
 
 - 公式の「取扱店舗」に再掲載されたとき：筐体の更新時刻が古くても通知
