@@ -212,6 +212,55 @@ class MonitorTests(unittest.TestCase):
                     self.now + timedelta(hours=1), old)
         self.assertEqual(daily_newer_stores([m], {m.key: old.isoformat()}, set()), [])
 
+    def test_daily_monitor_notifies_new_bic_listing_without_baseline(self):
+        from unittest.mock import patch
+        from monitor import run_daily
+        name = "ビックカメラ立川店"
+        state = {"store_presence": {
+            "タイトーステーション 立川北口店": "present"
+        }}
+        now = datetime.now(timezone.utc)
+        found = Machine(name, 1, "3時間前", TACHIKAWA_URL,
+                        now, now - timedelta(hours=3))
+        def listing_status(_html, shop):
+            return "present" if shop == name else "absent"
+        with (
+            patch("monitor.load_state", return_value=state),
+            patch("monitor.save_state"),
+            patch("monitor.fetch_page", return_value=(b"fixture", now)),
+            patch("monitor.store_listing_status", side_effect=listing_status),
+            patch("monitor.parse_store_page", return_value=[found]),
+            patch("monitor.send_discord") as discord,
+            patch.dict("os.environ", {"MONITOR_FINAL_SLOT": "false"}),
+        ):
+            self.assertEqual(run_daily("https://discord.com/api/webhooks/test", "30,40,50 0 * * *"), 0)
+            self.assertEqual(discord.call_count, 1)
+            self.assertIn("【取扱店舗に掲載されました】", discord.call_args[0][1])
+            self.assertIn(name, discord.call_args[0][1])
+            self.assertEqual(state["store_presence"][name], "present")
+            self.assertEqual(run_daily("https://discord.com/api/webhooks/test", "30,40,50 0 * * *"), 0)
+            self.assertEqual(discord.call_count, 1)
+
+    def test_daily_listing_alert_without_machine_details(self):
+        from unittest.mock import patch
+        from monitor import run_daily, ParseError
+        name = "ビックカメラ立川店"
+        state = {"store_presence": {name: "absent"}}
+        now = datetime.now(timezone.utc)
+        with (
+            patch("monitor.load_state", return_value=state),
+            patch("monitor.save_state"),
+            patch("monitor.fetch_page", return_value=(b"fixture", now)),
+            patch("monitor.store_listing_status", side_effect=lambda _, shop: "present" if shop == name else "absent"),
+            patch("monitor.parse_store_page", side_effect=ParseError("筐体詳細取得不可")),
+            patch("monitor.send_discord") as discord,
+            patch.dict("os.environ", {"MONITOR_FINAL_SLOT": "false"}),
+        ):
+            self.assertEqual(run_daily("https://discord.com/api/webhooks/test", "30,40,50 0 * * *"), 0)
+            self.assertEqual(discord.call_count, 1)
+            self.assertIn("【取扱店舗に掲載されました】", discord.call_args[0][1])
+            self.assertIn("情報取得不可", discord.call_args[0][1])
+
     def test_missing_timestamp_is_rejected(self):
         with self.assertRaises(ParseError):
             parse_timestamp("unknown")
