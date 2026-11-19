@@ -210,6 +210,8 @@ export async function scan(env,checkedAt=new Date().toISOString()){
     const prevMachines=new Map((machines.results||[]).map(r=>[r.id,r.updated_at]));
     const changes=chooseEvents(snapshot,prevStores,prevMachines,checkedAt);
     if(changes.events.length){
+      // Keep the exact reason in Cloudflare logs for future false-alert diagnosis.
+      console.log('Detected alert triggers:', JSON.stringify(changes.events));
       const message=formatNotification(snapshot,checkedAt,changes.events);
       if(message.length>1900)throw Error('Notification exceeds Discord limit');
       const hash=await crypto.subtle.digest('SHA-256',
