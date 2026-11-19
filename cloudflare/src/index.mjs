@@ -78,9 +78,22 @@ export async function parseOfficialPage(html, url, checkedAt, Rewriter=globalThi
   return snapshot;
 }
 
+/** A machine update is actionable only when the official visible age and
+ * its absolute timestamp both confirm it happened within the last 60 min.
+ * An old timestamp becoming newer than a stale DB baseline is NOT sufficient.
+ */
+export function isRecentlyUpdated(machine, checkedAt) {
+  const ageMs = new Date(checkedAt).getTime() - new Date(machine.updatedAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < -120000 || ageMs > 60*60*1000) return false;
+  const label = normalize(machine.label);
+  if (/^(?:今|たった今|数秒前|数分前|1分未満)$/.test(label)) return true;
+  if (/^\d+秒前$/.test(label)) return true;
+  const minutes = label.match(/^(\d+)分前$/);
+  return Boolean(minutes && Number(minutes[1]) <= 60);
+}
+
 export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
   const events=[];const nextStores=[];const nextMachines=[];
-  const checked=new Date(checkedAt).getTime();
   for(const store of STORES){
     const item=snapshot.get(store.name);
     if(!item||item.status==='unknown')continue;
@@ -96,8 +109,8 @@ export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
     for(const m of item.machines||[]){
       const key=store.name+'::'+m.number;
       const previous=oldMachines.get(key);
-      const fresh=checked-new Date(m.updatedAt).getTime()<=3600000;
-      if(previous&&m.updatedAt>previous)events.push('machine:'+key+':'+m.updatedAt);
+      const fresh=isRecentlyUpdated(m,checkedAt);
+      if(previous&&m.updatedAt>previous&&fresh)events.push('machine:'+key+':'+m.updatedAt);
       else if(!previous&&old?.status==='present'&&fresh)events.push('machine-new:'+key+':'+m.updatedAt);
       if(!previous||m.updatedAt>previous)nextMachines.push({key,store:store.name,updatedAt:m.updatedAt});
     }
@@ -108,7 +121,19 @@ export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
 export function formatNotification(snapshot,checkedAt,events=[]){
   const lines=[];
   const listing=events.filter(e=>e.startsWith('listing:')).map(e=>e.slice(8).split(':')[0]);
-  if(listing.length)lines.push('取扱店舗に掲載：'+listing.join('、'),'');
+  if(listing.length)lines.push('取扱店舗への新規掲載を検知：'+listing.join('、'),'');
+  const updated = events.filter(e=>e.startsWith('machine:')||e.startsWith('machine-new:'));
+  if(updated.length) {
+    lines.push('筐体の新しい更新を検知：');
+    for(const event of updated){
+      const match=event.match(/^machine(?:-new)?:([\s\S]+)::(\d+):(\d{4}-\d\d-\d\dT[\d:.]+Z)$/);
+      if(!match)continue;
+      const [,storeName,number,iso]=match;
+      const m=snapshot.get(storeName)?.machines?.find(x=>x.number===Number(number)&&x.updatedAt===iso);
+      lines.push(storeName+' '+number+'台目'+(m?'（'+m.label+'）':''));
+    }
+    lines.push('');
+  }
   for(const store of STORES){
     lines.push(store.name);
     const s=snapshot.get(store.name);
