@@ -2,6 +2,13 @@ name: Configure Discord /aikatsu command
 
 on:
   workflow_dispatch:
+  # After tests pass, automatically deploy future monitoring fixes.
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/src/**'
+      - 'cloudflare/tests/**'
+      - '.github/workflows/configure-discord-aikatsu.yml'
 
 permissions:
   contents: read
