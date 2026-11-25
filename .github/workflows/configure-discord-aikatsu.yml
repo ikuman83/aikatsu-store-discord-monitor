@@ -2,7 +2,12 @@ name: Configure Discord /aikatsu command
 
 on:
   workflow_dispatch:
-  # Deployment paused during official HTML format migration; retain manual dispatch.
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/src/**'
+      - 'cloudflare/tests/**'
+      - '.github/workflows/configure-discord-aikatsu.yml'
 
 permissions:
   contents: read
