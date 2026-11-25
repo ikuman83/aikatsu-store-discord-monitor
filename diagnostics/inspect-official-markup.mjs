@@ -3,7 +3,8 @@
  */
 const targets=[
   ['立川','https://dcd.aikatsu.com/encore/shoplist/list.php?free=%E7%AB%8B%E5%B7%9D&p=1'],
-  ['国分寺','https://dcd.aikatsu.com/encore/shoplist/list.php?free=%E5%9B%BD%E5%88%86%E5%AF%BA&p=1']
+  ['国分寺','https://dcd.aikatsu.com/encore/shoplist/list.php?free=%E5%9B%BD%E5%88%86%E5%AF%BA&p=1'],
+  ['新宿サンプル','https://dcd.aikatsu.com/encore/shoplist/list.php?free=%E6%96%B0%E5%AE%BF&p=1']
 ];
 for(const [area,url] of targets){
   const r=await fetch(url,{headers:{'Cache-Control':'no-cache','User-Agent':'Mozilla/5.0'},signal:AbortSignal.timeout(15000)});
