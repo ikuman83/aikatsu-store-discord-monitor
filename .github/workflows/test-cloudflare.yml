@@ -27,6 +27,8 @@ jobs:
         run: npm install --ignore-scripts
       - name: Unit tests
         run: npm test
+      - name: Inspect official online/offline HTML (read-only)
+        run: node ../diagnostics/inspect-official-markup.mjs
       - name: Syntax validation
         run: |
           node --check src/index.mjs
