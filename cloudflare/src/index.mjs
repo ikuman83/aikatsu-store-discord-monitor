@@ -44,13 +44,13 @@ export async function parseOfficialPage(html, url, checkedAt, Rewriter=globalThi
     .on('.modalFilterCol .storeInfoRow .storeColName', {text(t){if(modal)modal.name+=t.text;}})
     .on('.modalFilterCol li.runningItem', {element(e){
       if(!modal)return;
-      const m={number:'',label:'',timestamp:''};modal.machines.push(m);machine=m;
+      const m={number:'',cardText:'',cardClass:''};modal.machines.push(m);machine=m;
       e.onEndTag(()=>{machine=null;});
     }})
     .on('.modalFilterCol li.runningItem .runningItemNum .num', {text(t){if(machine)machine.number+=t.text;}})
-    .on('.modalFilterCol li.runningItem .runningItemTime .timeago', {
-      element(e){if(machine)machine.timestamp=e.getAttribute('title')||'';},
-      text(t){if(machine)machine.label+=t.text;},
+    .on('.modalFilterCol li.runningItem .runningCard', {
+      element(e){if(machine)machine.cardClass=e.getAttribute('class')||'';},
+      text(t){if(machine)machine.cardText+=t.text;},
     });
   await rewrite.transform(new Response(html,{headers:{'content-type':'text/html; charset=utf-8'}})).arrayBuffer();
   if(!title.includes('取扱店舗')) throw Error('Official page title changed');
@@ -65,33 +65,36 @@ export async function parseOfficialPage(html, url, checkedAt, Rewriter=globalThi
     const entries=[];const seen=new Set();let corrupt=false;
     for(const item of matches[0].machines){
       const number=Number(normalize(item.number));
-      let updatedAt;
-      try{updatedAt=parseOfficialTimestamp(item.timestamp);}catch{corrupt=true;break;}
-      const delta=new Date(checkedAt).getTime()-new Date(updatedAt).getTime();
-      if(!Number.isInteger(number)||number<1||seen.has(number)||!item.label.trim()||delta< -120000){
+      const status=classifyMachineCard(item.cardText,item.cardClass);
+      if(!Number.isInteger(number)||number<1||seen.has(number)||!status){
         corrupt=true;break;
       }
-      entries.push({store:store.name,number,label:item.label.trim(),updatedAt});seen.add(number);
+      entries.push({store:store.name,number,status});seen.add(number);
     }
     snapshot.set(store.name,{status:'present',machines:corrupt||!entries.length?null:entries});
   }
   return snapshot;
 }
 
-/** A machine update is actionable only when the official visible age and
- * its absolute timestamp both confirm it happened within the last 60 min.
- * An old timestamp becoming newer than a stale DB baseline is NOT sufficient.
+/** Do not infer 'online' from a missing timestamp or an unknown label.
+ * Official offline markup: <div class="runningCard stopped">オフライン</div>.
+ * Online cards can also display the current card/series information.
  */
-export function isRecentlyUpdated(machine, checkedAt) {
-  const ageMs = new Date(checkedAt).getTime() - new Date(machine.updatedAt).getTime();
-  if (!Number.isFinite(ageMs) || ageMs < -120000 || ageMs > 60*60*1000) return false;
-  const label = normalize(machine.label);
-  if (/^(?:今|たった今|数秒前|数分前|1分未満)$/.test(label)) return true;
-  if (/^\d+秒前$/.test(label)) return true;
-  const minutes = label.match(/^(\d+)分前$/);
-  return Boolean(minutes && Number(minutes[1]) <= 60);
+export function classifyMachineCard(cardText, cardClass='') {
+  const label=normalize(cardText);
+  const classes=String(cardClass||'').split(/\s+/);
+  if(label==='オフライン') return 'offline';
+  if(label==='オンライン') return 'online';
+  if(/停止|故障|カード切れ|稼働停止/.test(label)) return 'offline';
+  if(classes.includes('stopped')) return null; // Unrecognized stopped reason.
+  if(classes.includes('runningCard')&&label&&/(?:\d+弾|カード|稼働中)/.test(label))
+    return 'online';
+  return null;
 }
 
+/** Only confirmed offline -> online transitions send automated machine alerts.
+ * First sighting establishes a baseline and never generates a fake transition.
+ */
 export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
   const events=[];const nextStores=[];const nextMachines=[];
   for(const store of STORES){
@@ -100,19 +103,17 @@ export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
     const old=oldStores.get(store.name);
     if(item.status==='absent'){
       const missing=(old?.missing_count||0)+1;
-      // Two consecutive trustworthy absences to prevent flapping.
       nextStores.push({name:store.name,status:missing>=2?'absent':(old?.status||'absent'),missing});
       continue;
     }
-    if(old?.status!=='present')events.push('listing:'+store.name+':'+(old?.checked_at||'initial'));
+    if(old?.status==='absent') events.push('listing:'+store.name+':'+(old?.checked_at||'initial'));
     nextStores.push({name:store.name,status:'present',missing:0});
     for(const m of item.machines||[]){
       const key=store.name+'::'+m.number;
       const previous=oldMachines.get(key);
-      const fresh=isRecentlyUpdated(m,checkedAt);
-      if(previous&&m.updatedAt>previous&&fresh)events.push('machine:'+key+':'+m.updatedAt);
-      else if(!previous&&old?.status==='present'&&fresh)events.push('machine-new:'+key+':'+m.updatedAt);
-      if(!previous||m.updatedAt>previous)nextMachines.push({key,store:store.name,updatedAt:m.updatedAt});
+      if(previous==='offline'&&m.status==='online')
+        events.push('machine-online:'+key+':'+checkedAt);
+      nextMachines.push({key,store:store.name,status:m.status});
     }
   }
   return {events,nextStores,nextMachines};
@@ -122,15 +123,12 @@ export function formatNotification(snapshot,checkedAt,events=[]){
   const lines=[];
   const listing=events.filter(e=>e.startsWith('listing:')).map(e=>e.slice(8).split(':')[0]);
   if(listing.length)lines.push('取扱店舗への新規掲載を検知：'+listing.join('、'),'');
-  const updated = events.filter(e=>e.startsWith('machine:')||e.startsWith('machine-new:'));
+  const updated = events.filter(e=>e.startsWith('machine-online:'));
   if(updated.length) {
-    lines.push('筐体の新しい更新を検知：');
+    lines.push('オンラインへの切り替わりを検知：');
     for(const event of updated){
-      const match=event.match(/^machine(?:-new)?:([\s\S]+)::(\d+):(\d{4}-\d\d-\d\dT[\d:.]+Z)$/);
-      if(!match)continue;
-      const [,storeName,number,iso]=match;
-      const m=snapshot.get(storeName)?.machines?.find(x=>x.number===Number(number)&&x.updatedAt===iso);
-      lines.push(storeName+' '+number+'台目'+(m?'（'+m.label+'）':''));
+      const match=event.match(/^machine-online:([\s\S]+)::(\d+):(\d{4}-\d\d-\d\dT[\d:.]+Z)$/);
+      if(match) lines.push(match[1]+' '+match[2]+'台目');
     }
     lines.push('');
   }
@@ -140,7 +138,7 @@ export function formatNotification(snapshot,checkedAt,events=[]){
     if(!s||s.status==='unknown'||(s.status==='present'&&!s.machines))lines.push('情報取得不可');
     else if(s.status==='absent')lines.push('取扱店舗への掲載なし');
     else for(const m of s.machines.slice().sort((a,b)=>a.number-b.number))
-      lines.push(m.number+'台目【稼働】 '+m.label);
+      lines.push(m.number+'台目【'+(m.status==='online'?'オンライン':'オフライン')+'】');
     lines.push('');
   }
   lines.push('確認時間：'+tokyoFormat(checkedAt)+' JST');
@@ -204,10 +202,10 @@ export async function scan(env,checkedAt=new Date().toISOString()){
     }
     const [stores,machines]=await Promise.all([
       env.DB.prepare('SELECT name,status,missing_count,checked_at FROM store_state').all(),
-      env.DB.prepare('SELECT id,updated_at FROM machine_state').all(),
+      env.DB.prepare('SELECT id,status FROM machine_online_state').all(),
     ]);
     const prevStores=new Map((stores.results||[]).map(r=>[r.name,r]));
-    const prevMachines=new Map((machines.results||[]).map(r=>[r.id,r.updated_at]));
+    const prevMachines=new Map((machines.results||[]).map(r=>[r.id,r.status]));
     const changes=chooseEvents(snapshot,prevStores,prevMachines,checkedAt);
     if(changes.events.length){
       // Keep the exact reason in Cloudflare logs for future false-alert diagnosis.
@@ -227,9 +225,9 @@ export async function scan(env,checkedAt=new Date().toISOString()){
       'ON CONFLICT(name) DO UPDATE SET status=excluded.status,missing_count=excluded.missing_count,checked_at=excluded.checked_at'
     ).bind(s.name,s.status,s.missing,checkedAt).run();
     for(const m of changes.nextMachines)await env.DB.prepare(
-      'INSERT INTO machine_state (id,store,updated_at) VALUES (?,?,?) '+
-      'ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at'
-    ).bind(m.key,m.store,m.updatedAt).run();
+      'INSERT INTO machine_online_state (id,store,status,checked_at) VALUES (?,?,?,?) '+
+      'ON CONFLICT(id) DO UPDATE SET status=excluded.status,checked_at=excluded.checked_at'
+    ).bind(m.key,m.store,m.status,checkedAt).run();
     const status=snapshot.size===STORES.length?'complete':snapshot.size?'partial':'unavailable';
     await env.DB.prepare("INSERT INTO health (key,value) VALUES ('last_scan',?) "+
       'ON CONFLICT(key) DO UPDATE SET value=excluded.value'
