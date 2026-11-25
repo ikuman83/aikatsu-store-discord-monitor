@@ -228,7 +228,14 @@ export async function scan(env,checkedAt=new Date().toISOString()){
       'INSERT INTO machine_online_state (id,store,status,checked_at) VALUES (?,?,?,?) '+
       'ON CONFLICT(id) DO UPDATE SET status=excluded.status,checked_at=excluded.checked_at'
     ).bind(m.key,m.store,m.status,checkedAt).run();
-    const status=snapshot.size===STORES.length?'complete':snapshot.size?'partial':'unavailable';
+    // A parsed shop listing is not a complete health check if the card status
+    // could not be safely understood. Do not report a false healthy snapshot.
+    const complete=STORES.every(store=>{
+      const item=snapshot.get(store.name);
+      return item && (item.status==='absent' ||
+        (item.status==='present' && Array.isArray(item.machines)));
+    });
+    const status=complete?'complete':snapshot.size?'partial':'unavailable';
     await env.DB.prepare("INSERT INTO health (key,value) VALUES ('last_scan',?) "+
       'ON CONFLICT(key) DO UPDATE SET value=excluded.value'
     ).bind(JSON.stringify({at:checkedAt,status})).run();
