@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'cloudflare/**'
+      - 'diagnostics/**'
       - '.github/workflows/test-cloudflare.yml'
   workflow_dispatch:
 
