@@ -25,8 +25,8 @@ for(const [area,url] of targets){
       .replace(/\s+/g,' ').slice(0,2050));
   }
   console.log('ALL MACHINE CARDS:',JSON.stringify(
-    [...html.matchAll(/<div class="runningCard[^"]*"[^>]*>([\\s\\S]*?)<\\/div>/g)]
-      .map(m=>m[0].replace(/\\s+/g,' ').slice(0,240)).slice(0,40)
+    [...html.matchAll(/<div class="runningCard[^"]*"[^>]*>([\s\S]*?)<\/div>/g)]
+      .map(m=>m[0].replace(/\s+/g,' ').slice(0,240)).slice(0,40)
   ));
   const listStart=html.indexOf('modalFilterCol');
   if(listStart>=0){
