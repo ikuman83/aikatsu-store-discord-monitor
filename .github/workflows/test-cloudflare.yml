@@ -34,6 +34,11 @@ jobs:
         run: |
           node --check src/index.mjs
           node --check setup.mjs
+      - name: Probe production Cron health (read-only)
+        run: |
+          curl --fail-with-body --max-time 15 --silent --show-error \
+            https://aikatsu-encore-monitor.ikuman83.workers.dev/health || true
+          echo
       - name: Cloudflare Wrangler bundle validation (no deployment)
         run: |
           sed 's/REPLACE_WITH_YOUR_D1_UUID/00000000-0000-4000-8000-000000000001/' wrangler.toml > wrangler.ci.toml
