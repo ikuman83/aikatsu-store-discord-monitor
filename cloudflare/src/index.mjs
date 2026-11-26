@@ -84,9 +84,10 @@ export function classifyMachineCard(cardText, cardClass='') {
   const label=normalize(cardText);
   const classes=String(cardClass||'').split(/\s+/);
   if(label==='オフライン') return 'offline';
+  if(label==='カード切れ停止中') return 'card_empty';
   if(label==='オンライン') return 'online';
-  if(/停止|故障|カード切れ|稼働停止/.test(label)) return 'offline';
-  if(classes.includes('stopped')) return null; // Unrecognized stopped reason.
+  // Unrecognized stoppage must not be silently labeled offline or online.
+  if(classes.includes('stopped')) return null;
   if(classes.includes('runningCard')&&label&&/(?:\d+弾|カード|稼働中)/.test(label))
     return 'online';
   return null;
@@ -106,12 +107,12 @@ export function chooseEvents(snapshot,oldStores,oldMachines,checkedAt){
       nextStores.push({name:store.name,status:missing>=2?'absent':(old?.status||'absent'),missing});
       continue;
     }
-    if(old?.status==='absent') events.push('listing:'+store.name+':'+(old?.checked_at||'initial'));
+    // New/relisted shops are only recorded. Alerts are online transitions only.
     nextStores.push({name:store.name,status:'present',missing:0});
     for(const m of item.machines||[]){
       const key=store.name+'::'+m.number;
       const previous=oldMachines.get(key);
-      if(previous==='offline'&&m.status==='online')
+      if((previous==='offline'||previous==='card_empty')&&m.status==='online')
         events.push('machine-online:'+key+':'+checkedAt);
       nextMachines.push({key,store:store.name,status:m.status});
     }
@@ -138,7 +139,10 @@ export function formatNotification(snapshot,checkedAt,events=[]){
     if(!s||s.status==='unknown'||(s.status==='present'&&!s.machines))lines.push('情報取得不可');
     else if(s.status==='absent')lines.push('取扱店舗への掲載なし');
     else for(const m of s.machines.slice().sort((a,b)=>a.number-b.number))
-      lines.push(m.number+'台目【'+(m.status==='online'?'オンライン':'オフライン')+'】');
+      lines.push(m.number+'台目【'+(
+        m.status==='online'?'オンライン':
+        m.status==='card_empty'?'カード切れ停止中':'オフライン'
+      )+'】');
     lines.push('');
   }
   lines.push('確認時間：'+tokyoFormat(checkedAt)+' JST');
@@ -202,7 +206,7 @@ export async function scan(env,checkedAt=new Date().toISOString()){
     }
     const [stores,machines]=await Promise.all([
       env.DB.prepare('SELECT name,status,missing_count,checked_at FROM store_state').all(),
-      env.DB.prepare('SELECT id,status FROM machine_online_state').all(),
+      env.DB.prepare('SELECT id,status FROM machine_status_v2').all(),
     ]);
     const prevStores=new Map((stores.results||[]).map(r=>[r.name,r]));
     const prevMachines=new Map((machines.results||[]).map(r=>[r.id,r.status]));
@@ -225,7 +229,7 @@ export async function scan(env,checkedAt=new Date().toISOString()){
       'ON CONFLICT(name) DO UPDATE SET status=excluded.status,missing_count=excluded.missing_count,checked_at=excluded.checked_at'
     ).bind(s.name,s.status,s.missing,checkedAt).run();
     for(const m of changes.nextMachines)await env.DB.prepare(
-      'INSERT INTO machine_online_state (id,store,status,checked_at) VALUES (?,?,?,?) '+
+      'INSERT INTO machine_status_v2 (id,store,status,checked_at) VALUES (?,?,?,?) '+
       'ON CONFLICT(id) DO UPDATE SET status=excluded.status,checked_at=excluded.checked_at'
     ).bind(m.key,m.store,m.status,checkedAt).run();
     // A parsed shop listing is not a complete health check if the card status
