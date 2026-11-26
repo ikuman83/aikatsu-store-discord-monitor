@@ -18,6 +18,8 @@ test('official new offline markup is recognized',()=>{
   assert.equal(classifyMachineCard(' オフライン ','runningCard stopped'),'offline');
   assert.equal(classifyMachineCard('オンライン','runningCard'),'online');
   assert.equal(classifyMachineCard('オンライン','runningCard online'),'online');
+  assert.equal(classifyMachineCard('カード切れ停止中','runningCard stopped'),'card_empty');
+  assert.equal(classifyMachineCard(' カード切れ停止中 ','runningCard stopped'),'card_empty');
 });
 test('known series/card metadata in active runningCard is online',()=>{
   assert.equal(classifyMachineCard('1弾','runningCard'),'online');
@@ -34,6 +36,26 @@ test('offline to online transition notifies exactly once',()=>{
   assert.deepEqual(first.nextMachines,[{key:bic.name+'::1',store:bic.name,status:'online'}]);
   assert.deepEqual(chooseEvents(snapshot([online()]),present,onlineState,checkedAt).events,[]);
 });
+test('card-empty to online transition notifies exactly once',()=>{
+  const cards=new Map([[bic.name+'::1','card_empty']]);
+  const first=chooseEvents(snapshot([online()]),present,cards,checkedAt);
+  assert.deepEqual(first.events,['machine-online:'+bic.name+'::1:'+checkedAt]);
+  assert.deepEqual(chooseEvents(snapshot([online()]),present,onlineState,checkedAt).events,[]);
+});
+test('offline to card-empty transition updates DB without notification',()=>{
+  const first=chooseEvents(snapshot([{store:bic.name,number:1,status:'card_empty'}]),present,offlineState,checkedAt);
+  assert.deepEqual(first.events,[]);
+  assert.equal(first.nextMachines[0].status,'card_empty');
+});
+test('card-empty to offline transition never notifies',()=>{
+  const prev=new Map([[bic.name+'::1','card_empty']]);
+  const first=chooseEvents(snapshot([offline()]),present,prev,checkedAt);
+  assert.deepEqual(first.events,[]);
+});
+test('new listing with online machines is also silent until a known offline/card-empty to online transition',()=>{
+  const previous=new Map([[bic.name,{status:'absent',missing_count:2,checked_at:'2026-11-25T20:00:00Z'}]]);
+  assert.deepEqual(chooseEvents(snapshot([online()]),previous,new Map(),checkedAt).events,[]);
+});
 test('online to offline transition does not send a notification',()=>{
   const result=chooseEvents(snapshot([offline()]),present,onlineState,checkedAt);
   assert.deepEqual(result.events,[]);
@@ -43,10 +65,10 @@ test('first successful observation sets baseline without an alert',()=>{
   assert.deepEqual(chooseEvents(snapshot([online()]),present,new Map(),checkedAt).events,[]);
   assert.deepEqual(chooseEvents(snapshot([offline()]),present,new Map(),checkedAt).events,[]);
 });
-test('new listing after confirmed absence notifies, regardless of machine state',()=>{
+test('new listing with offline machines does not notify',()=>{
   const previous=new Map([[bic.name,{status:'absent',missing_count:2,checked_at:'2026-11-25T20:00:00Z'}]]);
   const result=chooseEvents(snapshot([offline()]),previous,new Map(),checkedAt);
-  assert.deepEqual(result.events,['listing:'+bic.name+':2026-11-25T20:00:00Z']);
+  assert.deepEqual(result.events,[]);
 });
 test('first observation with missing store history does not fake a re-listing',()=>{
   assert.deepEqual(chooseEvents(snapshot([online()]),new Map(),new Map(),checkedAt).events,[]);
@@ -68,6 +90,13 @@ test('new format /aikatsu response shows online/offline, not old times',()=>{
   assert.match(content,/ビックカメラ立川店\n1台目【オフライン】\n2台目【オンライン】/);
   assert.doesNotMatch(content,/分前|時間前|最終更新/);
   assert.match(content,/確認時間/);
+});
+test('Discord full status distinguishes offline from card-empty',()=>{
+  const machines=[online(1),offline(2),{store:bic.name,number:3,status:'card_empty'}];
+  const message=formatNotification(snapshot(machines),checkedAt);
+  assert.match(message,/1台目【オンライン】/);
+  assert.match(message,/2台目【オフライン】/);
+  assert.match(message,/3台目【カード切れ停止中】/);
 });
 test('automatic alert states online transition and which cabinet changed',()=>{
   const events=chooseEvents(snapshot([online()]),present,offlineState,checkedAt).events;
